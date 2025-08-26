@@ -15,10 +15,10 @@ The `--` separator is required to distinguish ghost flags from the target comman
 ### Diff Command
 
 ```
-ghost diff -i <input> -e <expected> -o <output> [--score <value>]
+ghost diff -i <input> -x <expected> -o <output> -e <stderr> [--diff-flags <flags>] [--score <value>]
 ```
 
-Compare two files and get structured JSON output with execution metadata.
+Compare two files and get structured JSON output with execution metadata. You can pass additional flags to the underlying diff command for flexible comparison. All four I/O flags are required, maintaining consistency with the run command.
 
 ## Flags
 
@@ -184,15 +184,16 @@ ghost run -i large_dataset.json -o processed.json -e errors.log -- ./data_proces
 Compare two files without scoring:
 
 ```bash
-ghost diff -i actual.txt -e expected.txt -o diff_output.txt
+ghost diff -i actual.txt -x expected.txt -o diff_output.txt -e errors.txt
 ```
 
 Output (files are identical):
 ```json
 {
   "input": "actual.txt",
-  "output": "expected.txt",
-  "stderr": "diff_output.txt",
+  "expected": "expected.txt",
+  "output": "diff_output.txt",
+  "stderr": "errors.txt",
   "exit_code": 0,
   "execution_time": 5
 }
@@ -202,8 +203,9 @@ Output (files differ):
 ```json
 {
   "input": "actual.txt",
-  "output": "expected.txt", 
-  "stderr": "diff_output.txt",
+  "expected": "expected.txt",
+  "output": "diff_output.txt",
+  "stderr": "errors.txt",
   "exit_code": 1,
   "execution_time": 7
 }
@@ -214,20 +216,21 @@ Output (files differ):
 Compare files with score (100 if match, 0 if different):
 
 ```bash
-ghost diff -i student_output.txt -e solution.txt -o comparison.txt --score 100
+ghost diff -i student_output.txt -x solution.txt -o comparison.txt -e errors.txt --score 100
 ```
 
 ### Test Output Validation
 
 ```bash
 # Compare test output with expected result
-ghost diff -i test_output.txt -e expected_output.txt -o test_diff.txt --score 100
+ghost diff -i test_output.txt -x expected_output.txt -o test_diff.txt -e errors.txt --score 100
 
 # Check multiple test outputs
 for test in tests/*.out; do
   expected="expected/$(basename $test)"
   diff_file="diffs/$(basename $test .out).diff"
-  ghost diff -i "$test" -e "$expected" -o "$diff_file" --score 100
+  error_file="diffs/$(basename $test .out).err"
+  ghost diff -i "$test" -x "$expected" -o "$diff_file" -e "$error_file" --score 100
 done
 ```
 
@@ -235,16 +238,62 @@ done
 
 ```bash
 # Verify configuration file matches template
-ghost diff -i config.yml -e config.template.yml -o config_diff.txt
+ghost diff -i config.yml -x config.template.yml -o config_diff.txt -e config_errors.txt
 
 # Compare build artifacts
-ghost diff -i build/output.js -e reference/output.js -o build_diff.txt --score 100
+ghost diff -i build/output.js -x reference/output.js -o build_diff.txt -e build_errors.txt --score 100
 ```
+
+### Using Diff Flags
+
+The `--diff-flags` option allows you to pass additional flags to the underlying diff command. This is particularly useful for grading scenarios where you want to ignore certain types of differences.
+
+#### Common Grading Flags
+
+- `--ignore-trailing-space` or `-Z`: Ignore white space at line end
+- `--ignore-space-change` or `-b`: Ignore changes in the amount of white space
+- `--ignore-all-space` or `-w`: Ignore all white space
+- `--ignore-blank-lines` or `-B`: Ignore changes where lines are all blank
+
+#### Examples with Diff Flags
+
+Ignore trailing whitespace when comparing:
+```bash
+ghost diff -i student_output.txt -x solution.txt -o diff.txt -e errors.txt --diff-flags "--ignore-trailing-space"
+```
+
+Ignore all whitespace differences:
+```bash
+ghost diff -i result.txt -x expected.txt -o diff.txt -e errors.txt --diff-flags "-w" --score 100
+```
+
+Combine multiple flags to ignore both trailing spaces and blank lines:
+```bash
+ghost diff -i submission.txt -x answer.txt -o diff.txt -e errors.txt --diff-flags "--ignore-trailing-space --ignore-blank-lines"
+```
+
+Use short flags for more concise commands:
+```bash
+ghost diff -i output.txt -x expected.txt -o diff.txt -e errors.txt --diff-flags "-b -B" --score 100
+```
+
+#### Grading Example
+
+For automated grading where formatting shouldn't affect scores:
+```bash
+# Ignore all formatting differences (spaces and blank lines)
+ghost diff -i student.txt -x solution.txt -o feedback.txt -e errors.txt \
+  --diff-flags "--ignore-all-space --ignore-blank-lines" \
+  --score 100
+```
+
+This will give full score (100) if the content matches regardless of spacing differences.
 
 ### Notes on Diff Output
 
 - The diff output is written to the file specified by `-o`
-- Exit code 0 means files are identical
+- Exit code 0 means files are identical (considering the flags)
 - Exit code 1 means files differ
 - The actual diff content can be found in the output file
 - Score is included only when `--score` flag is used
+- When using `--diff-flags`, the comparison respects those flags

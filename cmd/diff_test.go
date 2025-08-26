@@ -139,11 +139,14 @@ func TestDiffCommand(t *testing.T) {
 			tmpDir := t.TempDir()
 			inputFile, expectedFile := tt.setupFiles(t, tmpDir)
 			outputFile := filepath.Join(tmpDir, "diff_output.txt")
+			stderrFile := filepath.Join(tmpDir, "diff_stderr.txt")
 
 			// Reset flags
 			diffInputFile = inputFile
 			diffExpectedFile = expectedFile
 			diffOutputFile = outputFile
+			diffStderrFile = stderrFile
+			diffFlags = ""
 			diffScoreSet = tt.useScore
 			diffScore = tt.score
 
@@ -158,12 +161,13 @@ func TestDiffCommand(t *testing.T) {
 
 			// Parse JSON output
 			var result struct {
-				Input         string `json:"input"`
-				Output        string `json:"output"`
-				Stderr        string `json:"stderr"`
-				ExitCode      int    `json:"exit_code"`
-				ExecutionTime int64  `json:"execution_time"`
-				Score         *int   `json:"score,omitempty"`
+				Input         string  `json:"input"`
+				Expected      *string `json:"expected,omitempty"`
+				Output        string  `json:"output"`
+				Stderr        string  `json:"stderr"`
+				ExitCode      int     `json:"exit_code"`
+				ExecutionTime int64   `json:"execution_time"`
+				Score         *int    `json:"score,omitempty"`
 			}
 			if err := json.Unmarshal([]byte(output), &result); err != nil {
 				t.Fatalf("Failed to parse JSON output: %v\nOutput: %s", err, output)
@@ -210,6 +214,7 @@ func TestDiffCommandValidation(t *testing.T) {
 		inputFile    string
 		expectedFile string
 		outputFile   string
+		stderrFile   string
 		wantError    string
 	}{
 		{
@@ -217,6 +222,7 @@ func TestDiffCommandValidation(t *testing.T) {
 			inputFile:    "",
 			expectedFile: "expected.txt",
 			outputFile:   "output.txt",
+			stderrFile:   "stderr.txt",
 			wantError:    "required flag 'input' not set",
 		},
 		{
@@ -224,6 +230,7 @@ func TestDiffCommandValidation(t *testing.T) {
 			inputFile:    "input.txt",
 			expectedFile: "",
 			outputFile:   "output.txt",
+			stderrFile:   "stderr.txt",
 			wantError:    "required flag 'expected' not set",
 		},
 		{
@@ -231,7 +238,16 @@ func TestDiffCommandValidation(t *testing.T) {
 			inputFile:    "input.txt",
 			expectedFile: "expected.txt",
 			outputFile:   "",
+			stderrFile:   "stderr.txt",
 			wantError:    "required flag 'output' not set",
+		},
+		{
+			name:         "missing stderr flag",
+			inputFile:    "input.txt",
+			expectedFile: "expected.txt",
+			outputFile:   "output.txt",
+			stderrFile:   "",
+			wantError:    "required flag 'stderr' not set",
 		},
 	}
 
@@ -241,6 +257,8 @@ func TestDiffCommandValidation(t *testing.T) {
 			diffInputFile = tt.inputFile
 			diffExpectedFile = tt.expectedFile
 			diffOutputFile = tt.outputFile
+			diffStderrFile = tt.stderrFile
+			diffFlags = ""
 
 			err := diffCommand(diffCmd, []string{})
 
@@ -266,11 +284,14 @@ func TestDiffCommandWithNestedDirectories(t *testing.T) {
 
 	// Use nested directory for output
 	outputFile := filepath.Join(tmpDir, "nested", "dirs", "diff_output.txt")
+	stderrFile := filepath.Join(tmpDir, "nested", "dirs", "diff_stderr.txt")
 
 	// Set flags
 	diffInputFile = inputFile
 	diffExpectedFile = expectedFile
 	diffOutputFile = outputFile
+	diffStderrFile = stderrFile
+	diffFlags = ""
 	diffScoreSet = false
 
 	// Run command
@@ -285,6 +306,209 @@ func TestDiffCommandWithNestedDirectories(t *testing.T) {
 	// Verify nested directories were created
 	if _, err := os.Stat(outputFile); os.IsNotExist(err) {
 		t.Errorf("Output file was not created in nested directory")
+	}
+}
+
+// TestDiffCommandWithFlags tests the --diff-flags option
+func TestDiffCommandWithFlags(t *testing.T) {
+	tests := []struct {
+		name         string
+		setupFiles   func(t *testing.T, tmpDir string) (input, expected string)
+		diffFlags    string
+		wantExitCode int
+		wantScore    *int
+		useScore     bool
+		score        int
+	}{
+		{
+			name: "ignore trailing space",
+			setupFiles: func(t *testing.T, tmpDir string) (string, string) {
+				input := filepath.Join(tmpDir, "input.txt")
+				expected := filepath.Join(tmpDir, "expected.txt")
+
+				// Files differ only in trailing spaces
+				_ = os.WriteFile(input, []byte("Line 1  \nLine 2    \nLine 3\n"), 0644)
+				_ = os.WriteFile(expected, []byte("Line 1\nLine 2\nLine 3\n"), 0644)
+
+				return input, expected
+			},
+			diffFlags:    "--ignore-trailing-space",
+			wantExitCode: 0,
+			useScore:     true,
+			score:        100,
+			wantScore:    intPtr(100),
+		},
+		{
+			name: "ignore trailing space short flag",
+			setupFiles: func(t *testing.T, tmpDir string) (string, string) {
+				input := filepath.Join(tmpDir, "input.txt")
+				expected := filepath.Join(tmpDir, "expected.txt")
+
+				_ = os.WriteFile(input, []byte("test  \n"), 0644)
+				_ = os.WriteFile(expected, []byte("test\n"), 0644)
+
+				return input, expected
+			},
+			diffFlags:    "-Z",
+			wantExitCode: 0,
+		},
+		{
+			name: "ignore space change",
+			setupFiles: func(t *testing.T, tmpDir string) (string, string) {
+				input := filepath.Join(tmpDir, "input.txt")
+				expected := filepath.Join(tmpDir, "expected.txt")
+
+				// Files differ in amount of spaces
+				_ = os.WriteFile(input, []byte("Line  1\nLine    2\n"), 0644)
+				_ = os.WriteFile(expected, []byte("Line 1\nLine 2\n"), 0644)
+
+				return input, expected
+			},
+			diffFlags:    "--ignore-space-change",
+			wantExitCode: 0,
+			useScore:     true,
+			score:        100,
+			wantScore:    intPtr(100),
+		},
+		{
+			name: "ignore all space",
+			setupFiles: func(t *testing.T, tmpDir string) (string, string) {
+				input := filepath.Join(tmpDir, "input.txt")
+				expected := filepath.Join(tmpDir, "expected.txt")
+
+				// Files differ in all whitespace
+				_ = os.WriteFile(input, []byte("L i n e 1\n"), 0644)
+				_ = os.WriteFile(expected, []byte("Line1\n"), 0644)
+
+				return input, expected
+			},
+			diffFlags:    "--ignore-all-space",
+			wantExitCode: 0,
+		},
+		{
+			name: "ignore blank lines",
+			setupFiles: func(t *testing.T, tmpDir string) (string, string) {
+				input := filepath.Join(tmpDir, "input.txt")
+				expected := filepath.Join(tmpDir, "expected.txt")
+
+				// Files differ only in blank lines
+				_ = os.WriteFile(input, []byte("Line 1\n\n\nLine 2\n"), 0644)
+				_ = os.WriteFile(expected, []byte("Line 1\nLine 2\n"), 0644)
+
+				return input, expected
+			},
+			diffFlags:    "--ignore-blank-lines",
+			wantExitCode: 0,
+		},
+		{
+			name: "multiple flags combined",
+			setupFiles: func(t *testing.T, tmpDir string) (string, string) {
+				input := filepath.Join(tmpDir, "input.txt")
+				expected := filepath.Join(tmpDir, "expected.txt")
+
+				// Files differ in trailing spaces and blank lines
+				_ = os.WriteFile(input, []byte("Line 1  \n\nLine 2    \n\n"), 0644)
+				_ = os.WriteFile(expected, []byte("Line 1\nLine 2\n"), 0644)
+
+				return input, expected
+			},
+			diffFlags:    "--ignore-trailing-space --ignore-blank-lines",
+			wantExitCode: 0,
+			useScore:     true,
+			score:        100,
+			wantScore:    intPtr(100),
+		},
+		{
+			name: "short flags combined",
+			setupFiles: func(t *testing.T, tmpDir string) (string, string) {
+				input := filepath.Join(tmpDir, "input.txt")
+				expected := filepath.Join(tmpDir, "expected.txt")
+
+				_ = os.WriteFile(input, []byte("Line  1 \n\n"), 0644)
+				_ = os.WriteFile(expected, []byte("Line 1\n"), 0644)
+
+				return input, expected
+			},
+			diffFlags:    "-b -B",
+			wantExitCode: 0,
+		},
+		{
+			name: "flags don't match differences",
+			setupFiles: func(t *testing.T, tmpDir string) (string, string) {
+				input := filepath.Join(tmpDir, "input.txt")
+				expected := filepath.Join(tmpDir, "expected.txt")
+
+				// Real content difference, not just whitespace
+				_ = os.WriteFile(input, []byte("Line 1\n"), 0644)
+				_ = os.WriteFile(expected, []byte("Line 2\n"), 0644)
+
+				return input, expected
+			},
+			diffFlags:    "--ignore-trailing-space",
+			wantExitCode: 1,
+			useScore:     true,
+			score:        100,
+			wantScore:    intPtr(0),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			inputFile, expectedFile := tt.setupFiles(t, tmpDir)
+			outputFile := filepath.Join(tmpDir, "diff_output.txt")
+			stderrFile := filepath.Join(tmpDir, "diff_stderr.txt")
+
+			// Reset flags
+			diffInputFile = inputFile
+			diffExpectedFile = expectedFile
+			diffOutputFile = outputFile
+			diffStderrFile = stderrFile
+			diffFlags = tt.diffFlags
+			diffScoreSet = tt.useScore
+			diffScore = tt.score
+
+			// Capture output
+			output, err := captureOutput(func() error {
+				return diffCommand(diffCmd, []string{})
+			})
+
+			if err != nil {
+				t.Fatalf("diffCommand returned error: %v", err)
+			}
+
+			// Parse JSON output
+			var result struct {
+				Input         string  `json:"input"`
+				Expected      *string `json:"expected,omitempty"`
+				Output        string  `json:"output"`
+				Stderr        string  `json:"stderr"`
+				ExitCode      int     `json:"exit_code"`
+				ExecutionTime int64   `json:"execution_time"`
+				Score         *int    `json:"score,omitempty"`
+			}
+			if err := json.Unmarshal([]byte(output), &result); err != nil {
+				t.Fatalf("Failed to parse JSON output: %v\nOutput: %s", err, output)
+			}
+
+			// Check exit code
+			if result.ExitCode != tt.wantExitCode {
+				t.Errorf("Exit code = %d, want %d", result.ExitCode, tt.wantExitCode)
+			}
+
+			// Check score if applicable
+			if tt.wantScore == nil {
+				if result.Score != nil {
+					t.Errorf("Score should be nil, got %d", *result.Score)
+				}
+			} else {
+				if result.Score == nil {
+					t.Errorf("Score should not be nil, expected %d", *tt.wantScore)
+				} else if *result.Score != *tt.wantScore {
+					t.Errorf("Score = %d, want %d", *result.Score, *tt.wantScore)
+				}
+			}
+		})
 	}
 }
 

@@ -30,6 +30,29 @@ func createJSONResult(inputPath, outputPath, stderrPath string, result *runner.R
 	return jsonResult
 }
 
+// createDiffJSONResult creates a JSON result for diff command with expected field
+func createDiffJSONResult(inputPath, expectedPath, outputPath, stderrPath string, result *runner.Result, scoreSet bool, score int) *output.Result {
+	jsonResult := &output.Result{
+		Input:         inputPath,
+		Expected:      &expectedPath,
+		Output:        outputPath,
+		Stderr:        stderrPath,
+		ExitCode:      result.ExitCode,
+		ExecutionTime: result.ExecutionTime,
+	}
+
+	if scoreSet {
+		if result.ExitCode == 0 {
+			jsonResult.Score = &score
+		} else {
+			zero := 0
+			jsonResult.Score = &zero
+		}
+	}
+
+	return jsonResult
+}
+
 // outputJSON marshals and prints the result as JSON
 func outputJSON(result *output.Result) error {
 	jsonOutput, err := json.Marshal(result)
