@@ -31,6 +31,7 @@ Compare two files and get structured JSON output with execution metadata. You ca
 ### Optional Flags
 
 - `--score <integer>` - Include a score in the JSON output (conditional on exit code)
+- `-v, --verbose` - Show command stderr on terminal in addition to file
 - `-h, --help` - Show help information
 
 ## Examples
@@ -115,6 +116,21 @@ Execute a command with multiple arguments:
 
 ```bash
 ghost run -i data.csv -o processed.csv -e errors.log -- python process.py --format csv --verbose
+```
+
+### Verbose Mode
+
+Show command errors on terminal while also capturing to file:
+
+```bash
+# Run with verbose mode to see stderr on terminal
+ghost run -i input.txt -o output.txt -e errors.txt --verbose -- ./failing-command
+
+# Short form
+ghost run -i input.txt -o output.txt -e errors.txt -v -- ./my-command
+
+# Diff with verbose to see any diff errors
+ghost diff -i actual.txt -x expected.txt -o diff.txt -e errors.txt -v
 ```
 
 ## JSON Output Format

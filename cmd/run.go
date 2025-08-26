@@ -11,6 +11,7 @@ var (
 	inputFile  string
 	outputFile string
 	stderrFile string
+	verbose    bool
 	score      int
 	scoreSet   bool
 )
@@ -58,6 +59,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		InputFile:  inputFile,
 		OutputFile: outputFile,
 		StderrFile: stderrFile,
+		Verbose:    verbose,
 	}
 
 	result, err := runner.Execute(config)
@@ -83,6 +85,7 @@ func init() {
 	runCmd.Flags().StringVarP(&inputFile, "input", "i", "", "Input file to redirect to command's stdin (required)")
 	runCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Output file to capture command's stdout (required)")
 	runCmd.Flags().StringVarP(&stderrFile, "stderr", "e", "", "Error file to capture command's stderr (required)")
+	runCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show command stderr on terminal in addition to file")
 
 	// Mark flags as required
 	_ = runCmd.MarkFlagRequired("input")

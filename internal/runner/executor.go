@@ -2,6 +2,7 @@ package runner
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,7 @@ type Config struct {
 	InputFile  string
 	OutputFile string
 	StderrFile string
+	Verbose    bool
 }
 
 type Result struct {
@@ -57,7 +59,13 @@ func Execute(config *Config) (*Result, error) {
 		return nil, fmt.Errorf("failed to create stderr file: %w", err)
 	}
 	defer func() { _ = stderrFile.Close() }()
-	cmd.Stderr = stderrFile
+
+	// If verbose mode is enabled, pipe stderr to both file and terminal
+	if config.Verbose {
+		cmd.Stderr = io.MultiWriter(stderrFile, os.Stderr)
+	} else {
+		cmd.Stderr = stderrFile
+	}
 
 	startTime := time.Now()
 	err = cmd.Run()

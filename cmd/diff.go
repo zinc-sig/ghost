@@ -13,6 +13,7 @@ var (
 	diffExpectedFile string
 	diffOutputFile   string
 	diffStderrFile   string
+	diffVerbose      bool
 	diffFlags        string
 	diffScore        int
 	diffScoreSet     bool
@@ -75,6 +76,7 @@ func diffCommand(cmd *cobra.Command, args []string) error {
 		InputFile:  "/dev/null", // diff doesn't need stdin
 		OutputFile: diffOutputFile,
 		StderrFile: diffStderrFile,
+		Verbose:    diffVerbose,
 	}
 
 	// Execute diff command
@@ -103,6 +105,7 @@ func init() {
 	diffCmd.Flags().StringVarP(&diffExpectedFile, "expected", "x", "", "Expected file to compare against (required)")
 	diffCmd.Flags().StringVarP(&diffOutputFile, "output", "o", "", "Output file for diff results (required)")
 	diffCmd.Flags().StringVarP(&diffStderrFile, "stderr", "e", "", "Error file to capture diff's stderr (required)")
+	diffCmd.Flags().BoolVarP(&diffVerbose, "verbose", "v", false, "Show diff stderr on terminal in addition to file")
 	diffCmd.Flags().StringVar(&diffFlags, "diff-flags", "", "Flags to pass to the diff command (e.g., \"--ignore-trailing-space -B\")")
 
 	// Mark flags as required
