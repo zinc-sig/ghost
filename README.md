@@ -22,16 +22,16 @@ go build -o ghost
 
 ## Quick Start
 
-Execute a command with input/output redirection:
+Execute a command with required input/output redirection:
 
 ```bash
 ghost run -i input.txt -o output.txt -e stderr.txt -- ./my-command my_args
 ```
 
-Execute with scoring:
+Execute with scoring (all I/O flags are required):
 
 ```bash
-ghost run --score 85 -o result.txt -- python script.py
+ghost run -i input.txt -o output.txt -e stderr.txt --score 85 -- python script.py
 ```
 
 ## JSON Output
@@ -49,9 +49,11 @@ Ghost outputs execution results as JSON to stdout:
 }
 ```
 
+**Note**: The `-i`, `-o`, and `-e` flags are mandatory for all command executions.
+
 ## Features
 
-- **I/O Redirection**: Redirect stdin, stdout, and stderr to files
+- **I/O Redirection**: Required redirection of stdin, stdout, and stderr to files
 - **Execution Timing**: Precise execution time measurement in milliseconds
 - **Score Tracking**: Optional scoring with conditional logic
 - **Structured Output**: JSON format for easy parsing and automation

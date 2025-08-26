@@ -25,8 +25,8 @@ timing information, and optional scoring. Results are output as JSON.
 
 The '--' separator is required to distinguish ghost flags from the target command.`,
 	Example: `  ghost run -i input.txt -o output.txt -e error.log -- ./my-command arg1 arg2
-  ghost run --score 85 -o result.txt -- python script.py
-  ghost run -- echo "Hello World"`,
+  ghost run -i data.csv -o results.txt -e errors.log --score 85 -- python script.py
+  ghost run -i /dev/null -o output.txt -e error.txt -- echo "Hello World"`,
 	RunE: runCommand,
 }
 
@@ -40,15 +40,26 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("command separator '--' is required")
 	}
 
+	// Validate required flags
+	if inputFile == "" {
+		return fmt.Errorf("required flag 'input' not set")
+	}
+	if outputFile == "" {
+		return fmt.Errorf("required flag 'output' not set")
+	}
+	if stderrFile == "" {
+		return fmt.Errorf("required flag 'stderr' not set")
+	}
+
 	targetCommand := args[0]
 	targetArgs := args[1:]
 
 	config := &runner.Config{
 		Command:    targetCommand,
 		Args:       targetArgs,
-		InputFile:  getStringPtr(inputFile),
-		OutputFile: getStringPtr(outputFile),
-		StderrFile: getStringPtr(stderrFile),
+		InputFile:  inputFile,
+		OutputFile: outputFile,
+		StderrFile: stderrFile,
 	}
 
 	result, err := runner.Execute(config)
@@ -82,17 +93,15 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func getStringPtr(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
 func init() {
-	runCmd.Flags().StringVarP(&inputFile, "input", "i", "", "Input file to redirect to command's stdin")
-	runCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Output file to capture command's stdout")
-	runCmd.Flags().StringVarP(&stderrFile, "stderr", "e", "", "Error file to capture command's stderr")
+	runCmd.Flags().StringVarP(&inputFile, "input", "i", "", "Input file to redirect to command's stdin (required)")
+	runCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Output file to capture command's stdout (required)")
+	runCmd.Flags().StringVarP(&stderrFile, "stderr", "e", "", "Error file to capture command's stderr (required)")
+	
+	// Mark flags as required
+	runCmd.MarkFlagRequired("input")
+	runCmd.MarkFlagRequired("output")
+	runCmd.MarkFlagRequired("stderr")
 	runCmd.Flags().IntVar(&score, "score", 0, "Optional score integer (included in output if exit code is 0)")
 	
 	runCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
