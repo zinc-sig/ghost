@@ -36,13 +36,6 @@ func assertFileContains(t *testing.T, path, expected string) {
 	}
 }
 
-func assertExecutionTimeInRange(t *testing.T, ms int64, min, max int64) {
-	t.Helper()
-	if ms < min || ms > max {
-		t.Errorf("execution time %d ms not in range [%d, %d]", ms, min, max)
-	}
-}
-
 func TestExecute(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -319,7 +312,7 @@ func TestExecutionTime(t *testing.T) {
 	// Execution time should be close to actual elapsed time
 	diff := elapsed - result.ExecutionTime
 	if diff < -50 || diff > 50 {
-		t.Errorf("execution time %d ms differs significantly from actual elapsed time %d ms", 
+		t.Errorf("execution time %d ms differs significantly from actual elapsed time %d ms",
 			result.ExecutionTime, elapsed)
 	}
 }
@@ -330,7 +323,7 @@ func TestLargeOutput(t *testing.T) {
 
 	// Generate large output
 	largeText := strings.Repeat("Hello World\n", 10000)
-	
+
 	config := &Config{
 		Command:    "sh",
 		Args:       []string{"-c", "for i in $(seq 1 10000); do echo 'Hello World'; done"},
@@ -351,7 +344,7 @@ func TestLargeOutput(t *testing.T) {
 	// Check that output file has expected size
 	outputContent := readFile(t, filepath.Join(tmpDir, "output.txt"))
 	if len(outputContent) != len(largeText) {
-		t.Errorf("output size mismatch: got %d bytes, want %d bytes", 
+		t.Errorf("output size mismatch: got %d bytes, want %d bytes",
 			len(outputContent), len(largeText))
 	}
 }
@@ -373,7 +366,7 @@ func BenchmarkExecute(b *testing.B) {
 			OutputFile: filepath.Join(tmpDir, "output.txt"),
 			StderrFile: filepath.Join(tmpDir, "stderr.txt"),
 		}
-		
+
 		_, err := Execute(config)
 		if err != nil {
 			b.Fatalf("unexpected error: %v", err)

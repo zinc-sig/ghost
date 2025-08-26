@@ -97,13 +97,13 @@ func init() {
 	runCmd.Flags().StringVarP(&inputFile, "input", "i", "", "Input file to redirect to command's stdin (required)")
 	runCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Output file to capture command's stdout (required)")
 	runCmd.Flags().StringVarP(&stderrFile, "stderr", "e", "", "Error file to capture command's stderr (required)")
-	
+
 	// Mark flags as required
-	runCmd.MarkFlagRequired("input")
-	runCmd.MarkFlagRequired("output")
-	runCmd.MarkFlagRequired("stderr")
+	_ = runCmd.MarkFlagRequired("input")
+	_ = runCmd.MarkFlagRequired("output")
+	_ = runCmd.MarkFlagRequired("stderr")
 	runCmd.Flags().IntVar(&score, "score", 0, "Optional score integer (included in output if exit code is 0)")
-	
+
 	runCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
 		scoreSet = cmd.Flags().Changed("score")
 		return nil

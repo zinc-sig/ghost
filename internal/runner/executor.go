@@ -28,21 +28,21 @@ func Execute(config *Config) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open input file %s: %w", config.InputFile, err)
 	}
-	defer inputFile.Close()
+	defer func() { _ = inputFile.Close() }()
 	cmd.Stdin = inputFile
 
 	outputFile, err := os.Create(config.OutputFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create output file %s: %w", config.OutputFile, err)
 	}
-	defer outputFile.Close()
+	defer func() { _ = outputFile.Close() }()
 	cmd.Stdout = outputFile
 
 	stderrFile, err := os.Create(config.StderrFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create stderr file %s: %w", config.StderrFile, err)
 	}
-	defer stderrFile.Close()
+	defer func() { _ = stderrFile.Close() }()
 	cmd.Stderr = stderrFile
 
 	startTime := time.Now()
