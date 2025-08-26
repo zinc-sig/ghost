@@ -1,6 +1,7 @@
 package output
 
 type Result struct {
+	Command       string  `json:"command"`
 	Input         string  `json:"input"`
 	Expected      *string `json:"expected,omitempty"`
 	Output        string  `json:"output"`

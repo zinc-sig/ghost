@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -20,6 +21,7 @@ type Config struct {
 }
 
 type Result struct {
+	Command       string
 	ExitCode      int
 	ExecutionTime int64 // milliseconds
 }
@@ -39,6 +41,12 @@ func createFileWithDir(path string) (*os.File, error) {
 
 func Execute(config *Config) (*Result, error) {
 	cmd := exec.Command(config.Command, config.Args...)
+
+	// Build the full command string for the result
+	fullCommand := config.Command
+	if len(config.Args) > 0 {
+		fullCommand = fullCommand + " " + strings.Join(config.Args, " ")
+	}
 
 	inputFile, err := os.Open(config.InputFile)
 	if err != nil {
@@ -87,6 +95,7 @@ func Execute(config *Config) (*Result, error) {
 	}
 
 	return &Result{
+		Command:       fullCommand,
 		ExitCode:      exitCode,
 		ExecutionTime: executionTime,
 	}, nil

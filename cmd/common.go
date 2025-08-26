@@ -11,6 +11,7 @@ import (
 // createJSONResult creates a JSON result from execution results
 func createJSONResult(inputPath, outputPath, stderrPath string, result *runner.Result, scoreSet bool, score int) *output.Result {
 	jsonResult := &output.Result{
+		Command:       result.Command,
 		Input:         inputPath,
 		Output:        outputPath,
 		Stderr:        stderrPath,
@@ -33,6 +34,7 @@ func createJSONResult(inputPath, outputPath, stderrPath string, result *runner.R
 // createDiffJSONResult creates a JSON result for diff command with expected field
 func createDiffJSONResult(inputPath, expectedPath, outputPath, stderrPath string, result *runner.Result, scoreSet bool, score int) *output.Result {
 	jsonResult := &output.Result{
+		Command:       result.Command,
 		Input:         inputPath,
 		Expected:      &expectedPath,
 		Output:        outputPath,

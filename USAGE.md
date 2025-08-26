@@ -47,6 +47,7 @@ ghost run -i /dev/null -o output.txt -e error.txt -- echo "Hello, World!"
 Output:
 ```json
 {
+  "command": "echo Hello, World!",
   "input": "/dev/null",
   "output": "output.txt",
   "stderr": "error.txt",
@@ -66,6 +67,7 @@ ghost run -i input.txt -o output.txt -e error.log -- ./process-data
 Output:
 ```json
 {
+  "command": "./process-data",
   "input": "input.txt",
   "output": "output.txt",
   "stderr": "error.log", 
@@ -85,6 +87,7 @@ ghost run -i input.txt -o results.txt -e errors.txt --score 95 -- python test_su
 Output (if exit_code is 0):
 ```json
 {
+  "command": "python test_suite.py",
   "input": "input.txt",
   "output": "results.txt",
   "stderr": "errors.txt",
@@ -101,6 +104,7 @@ Execute the same command when it fails:
 Output (if exit_code is non-zero):
 ```json
 {
+  "command": "python test_suite.py",
   "input": "input.txt",
   "output": "results.txt",
   "stderr": "errors.txt",
@@ -139,6 +143,7 @@ Ghost always outputs JSON to stdout with the following structure:
 
 ```json
 {
+  "command": "string",        // The command that was executed (always present)
   "input": "string",          // Input file path (always present)
   "output": "string",         // Output file path (always present)  
   "stderr": "string",         // Stderr file path (always present)
@@ -150,9 +155,10 @@ Ghost always outputs JSON to stdout with the following structure:
 
 ### Field Rules
 
-1. **Required Fields**: `input`, `output`, `stderr`, `exit_code` and `execution_time` are always present
-2. **File Fields**: `input`, `output`, `stderr` must be specified via their respective flags
-3. **Score Field**: Only present if `--score` flag is used
+1. **Required Fields**: `command`, `input`, `output`, `stderr`, `exit_code` and `execution_time` are always present
+2. **Command Field**: Shows the full command that was executed including all arguments
+3. **File Fields**: `input`, `output`, `stderr` must be specified via their respective flags
+4. **Score Field**: Only present if `--score` flag is used
    - If `exit_code` is 0: includes provided score value
    - If `exit_code` is non-zero: score becomes 0
 
@@ -206,6 +212,7 @@ ghost diff -i actual.txt -x expected.txt -o diff_output.txt -e errors.txt
 Output (files are identical):
 ```json
 {
+  "command": "diff actual.txt expected.txt",
   "input": "actual.txt",
   "expected": "expected.txt",
   "output": "diff_output.txt",
@@ -218,6 +225,7 @@ Output (files are identical):
 Output (files differ):
 ```json
 {
+  "command": "diff actual.txt expected.txt",
   "input": "actual.txt",
   "expected": "expected.txt",
   "output": "diff_output.txt",

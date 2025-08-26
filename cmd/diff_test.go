@@ -161,6 +161,7 @@ func TestDiffCommand(t *testing.T) {
 
 			// Parse JSON output
 			var result struct {
+				Command       string  `json:"command"`
 				Input         string  `json:"input"`
 				Expected      *string `json:"expected,omitempty"`
 				Output        string  `json:"output"`
@@ -479,6 +480,7 @@ func TestDiffCommandWithFlags(t *testing.T) {
 
 			// Parse JSON output
 			var result struct {
+				Command       string  `json:"command"`
 				Input         string  `json:"input"`
 				Expected      *string `json:"expected,omitempty"`
 				Output        string  `json:"output"`
