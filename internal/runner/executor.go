@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"time"
 )
@@ -21,6 +22,19 @@ type Result struct {
 	ExecutionTime int64 // milliseconds
 }
 
+// createFileWithDir creates a file and any necessary parent directories
+func createFileWithDir(path string) (*os.File, error) {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create directory %s: %w", dir, err)
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create file %s: %w", path, err)
+	}
+	return file, nil
+}
+
 func Execute(config *Config) (*Result, error) {
 	cmd := exec.Command(config.Command, config.Args...)
 
@@ -31,16 +45,16 @@ func Execute(config *Config) (*Result, error) {
 	defer func() { _ = inputFile.Close() }()
 	cmd.Stdin = inputFile
 
-	outputFile, err := os.Create(config.OutputFile)
+	outputFile, err := createFileWithDir(config.OutputFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create output file %s: %w", config.OutputFile, err)
+		return nil, fmt.Errorf("failed to create output file: %w", err)
 	}
 	defer func() { _ = outputFile.Close() }()
 	cmd.Stdout = outputFile
 
-	stderrFile, err := os.Create(config.StderrFile)
+	stderrFile, err := createFileWithDir(config.StderrFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create stderr file %s: %w", config.StderrFile, err)
+		return nil, fmt.Errorf("failed to create stderr file: %w", err)
 	}
 	defer func() { _ = stderrFile.Close() }()
 	cmd.Stderr = stderrFile

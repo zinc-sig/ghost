@@ -132,34 +132,66 @@ func TestExecute(t *testing.T) {
 			errorContains: "failed to open input file",
 		},
 		{
-			name: "invalid output directory",
+			name: "creates parent directories for output",
 			setupConfig: func(t *testing.T, tmpDir string) *Config {
 				inputFile := createTempFile(t, tmpDir, "input.txt", "")
 				return &Config{
 					Command:    "echo",
 					Args:       []string{"test"},
 					InputFile:  inputFile,
-					OutputFile: filepath.Join(tmpDir, "nonexistent", "output.txt"),
+					OutputFile: filepath.Join(tmpDir, "new", "nested", "dir", "output.txt"),
 					StderrFile: filepath.Join(tmpDir, "stderr.txt"),
 				}
 			},
-			wantError:     true,
-			errorContains: "failed to create output file",
+			wantExitCode: 0,
+			wantError:    false,
+			checkOutput: func(t *testing.T, tmpDir string) {
+				// Verify the nested directory structure was created and file contains output
+				outputPath := filepath.Join(tmpDir, "new", "nested", "dir", "output.txt")
+				assertFileContains(t, outputPath, "test\n")
+			},
 		},
 		{
-			name: "invalid stderr directory",
+			name: "creates parent directories for stderr",
 			setupConfig: func(t *testing.T, tmpDir string) *Config {
 				inputFile := createTempFile(t, tmpDir, "input.txt", "")
 				return &Config{
-					Command:    "echo",
-					Args:       []string{"test"},
+					Command:    "sh",
+					Args:       []string{"-c", "echo 'error' >&2"},
 					InputFile:  inputFile,
 					OutputFile: filepath.Join(tmpDir, "output.txt"),
-					StderrFile: filepath.Join(tmpDir, "nonexistent", "stderr.txt"),
+					StderrFile: filepath.Join(tmpDir, "logs", "errors", "stderr.txt"),
 				}
 			},
-			wantError:     true,
-			errorContains: "failed to create stderr file",
+			wantExitCode: 0,
+			wantError:    false,
+			checkOutput: func(t *testing.T, tmpDir string) {
+				// Verify stderr directory was created and file contains error output
+				stderrPath := filepath.Join(tmpDir, "logs", "errors", "stderr.txt")
+				assertFileContains(t, stderrPath, "error\n")
+			},
+		},
+		{
+			name: "creates directories for both output and stderr",
+			setupConfig: func(t *testing.T, tmpDir string) *Config {
+				inputFile := createTempFile(t, tmpDir, "input.txt", "")
+				return &Config{
+					Command:    "sh",
+					Args:       []string{"-c", "echo 'out' && echo 'err' >&2"},
+					InputFile:  inputFile,
+					OutputFile: filepath.Join(tmpDir, "results", "output", "stdout.txt"),
+					StderrFile: filepath.Join(tmpDir, "results", "errors", "stderr.txt"),
+				}
+			},
+			wantExitCode: 0,
+			wantError:    false,
+			checkOutput: func(t *testing.T, tmpDir string) {
+				// Verify both directory structures were created
+				outputPath := filepath.Join(tmpDir, "results", "output", "stdout.txt")
+				stderrPath := filepath.Join(tmpDir, "results", "errors", "stderr.txt")
+				assertFileContains(t, outputPath, "out\n")
+				assertFileContains(t, stderrPath, "err\n")
+			},
 		},
 		{
 			name: "non-existent command",
