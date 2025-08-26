@@ -9,14 +9,20 @@ import (
 )
 
 // createJSONResult creates a JSON result from execution results
-func createJSONResult(inputPath, outputPath, stderrPath string, result *runner.Result, scoreSet bool, score int) *output.Result {
+func createJSONResult(inputPath, outputPath, stderrPath string, result *runner.Result, timeoutMs int64, scoreSet bool, score int) *output.Result {
 	jsonResult := &output.Result{
 		Command:       result.Command,
+		Status:        string(result.Status),
 		Input:         inputPath,
 		Output:        outputPath,
 		Stderr:        stderrPath,
 		ExitCode:      result.ExitCode,
 		ExecutionTime: result.ExecutionTime,
+	}
+
+	// Add timeout if it was set
+	if timeoutMs > 0 {
+		jsonResult.Timeout = &timeoutMs
 	}
 
 	if scoreSet {
@@ -32,15 +38,21 @@ func createJSONResult(inputPath, outputPath, stderrPath string, result *runner.R
 }
 
 // createDiffJSONResult creates a JSON result for diff command with expected field
-func createDiffJSONResult(inputPath, expectedPath, outputPath, stderrPath string, result *runner.Result, scoreSet bool, score int) *output.Result {
+func createDiffJSONResult(inputPath, expectedPath, outputPath, stderrPath string, result *runner.Result, timeoutMs int64, scoreSet bool, score int) *output.Result {
 	jsonResult := &output.Result{
 		Command:       result.Command,
+		Status:        string(result.Status),
 		Input:         inputPath,
 		Expected:      &expectedPath,
 		Output:        outputPath,
 		Stderr:        stderrPath,
 		ExitCode:      result.ExitCode,
 		ExecutionTime: result.ExecutionTime,
+	}
+
+	// Add timeout if it was set
+	if timeoutMs > 0 {
+		jsonResult.Timeout = &timeoutMs
 	}
 
 	if scoreSet {

@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,15 @@ import (
 	"time"
 )
 
+// Status represents the execution status of a command
+type Status string
+
+const (
+	StatusSuccess Status = "success"
+	StatusFailed  Status = "failed"
+	StatusTimeout Status = "timeout"
+)
+
 type Config struct {
 	Command    string
 	Args       []string
@@ -18,10 +28,12 @@ type Config struct {
 	OutputFile string
 	StderrFile string
 	Verbose    bool
+	Timeout    time.Duration // 0 means no timeout
 }
 
 type Result struct {
 	Command       string
+	Status        Status
 	ExitCode      int
 	ExecutionTime int64 // milliseconds
 }
@@ -40,12 +52,23 @@ func createFileWithDir(path string) (*os.File, error) {
 }
 
 func Execute(config *Config) (*Result, error) {
-	cmd := exec.Command(config.Command, config.Args...)
-
 	// Build the full command string for the result
 	fullCommand := config.Command
 	if len(config.Args) > 0 {
 		fullCommand = fullCommand + " " + strings.Join(config.Args, " ")
+	}
+
+	// Create command with or without timeout
+	var cmd *exec.Cmd
+	var ctx context.Context
+	var cancel context.CancelFunc
+
+	if config.Timeout > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), config.Timeout)
+		defer cancel()
+		cmd = exec.CommandContext(ctx, config.Command, config.Args...)
+	} else {
+		cmd = exec.Command(config.Command, config.Args...)
 	}
 
 	inputFile, err := os.Open(config.InputFile)
@@ -81,11 +104,19 @@ func Execute(config *Config) (*Result, error) {
 
 	executionTime := endTime.Sub(startTime).Milliseconds()
 
+	// Determine status and exit code based on error
+	status := StatusSuccess
 	exitCode := 0
+
 	if err != nil {
-		if exitError, ok := err.(*exec.ExitError); ok {
-			if status, ok := exitError.Sys().(syscall.WaitStatus); ok {
-				exitCode = status.ExitStatus()
+		// Check for timeout - need to check context directly since exec.ExitError can mask it
+		if ctx != nil && ctx.Err() == context.DeadlineExceeded {
+			status = StatusTimeout
+			exitCode = -1 // Standard exit code for killed process
+		} else if exitError, ok := err.(*exec.ExitError); ok {
+			status = StatusFailed
+			if sysStatus, ok := exitError.Sys().(syscall.WaitStatus); ok {
+				exitCode = sysStatus.ExitStatus()
 			} else {
 				exitCode = 1
 			}
@@ -96,6 +127,7 @@ func Execute(config *Config) (*Result, error) {
 
 	return &Result{
 		Command:       fullCommand,
+		Status:        status,
 		ExitCode:      exitCode,
 		ExecutionTime: executionTime,
 	}, nil

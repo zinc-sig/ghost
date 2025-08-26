@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zinc-sig/ghost/internal/runner"
@@ -14,6 +15,8 @@ var (
 	diffOutputFile   string
 	diffStderrFile   string
 	diffVerbose      bool
+	diffTimeoutStr   string
+	diffTimeout      time.Duration
 	diffFlags        string
 	diffScore        int
 	diffScoreSet     bool
@@ -77,6 +80,7 @@ func diffCommand(cmd *cobra.Command, args []string) error {
 		OutputFile: diffOutputFile,
 		StderrFile: diffStderrFile,
 		Verbose:    diffVerbose,
+		Timeout:    diffTimeout,
 	}
 
 	// Execute diff command
@@ -86,12 +90,17 @@ func diffCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create JSON result for diff command
+	var timeoutMs int64
+	if diffTimeout > 0 {
+		timeoutMs = diffTimeout.Milliseconds()
+	}
 	jsonResult := createDiffJSONResult(
 		diffInputFile,
 		diffExpectedFile,
 		diffOutputFile,
 		diffStderrFile,
 		result,
+		timeoutMs,
 		diffScoreSet,
 		diffScore,
 	)
@@ -107,6 +116,7 @@ func init() {
 	diffCmd.Flags().StringVarP(&diffStderrFile, "stderr", "e", "", "Error file to capture diff's stderr (required)")
 	diffCmd.Flags().BoolVarP(&diffVerbose, "verbose", "v", false, "Show diff stderr on terminal in addition to file")
 	diffCmd.Flags().StringVar(&diffFlags, "diff-flags", "", "Flags to pass to the diff command (e.g., \"--ignore-trailing-space -B\")")
+	diffCmd.Flags().StringVarP(&diffTimeoutStr, "timeout", "t", "", "Timeout duration (e.g., 30s, 2m, 500ms)")
 
 	// Mark flags as required
 	_ = diffCmd.MarkFlagRequired("input")
@@ -118,6 +128,19 @@ func init() {
 
 	diffCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
 		diffScoreSet = cmd.Flags().Changed("score")
+
+		// Parse timeout if provided
+		if diffTimeoutStr != "" {
+			var err error
+			diffTimeout, err = time.ParseDuration(diffTimeoutStr)
+			if err != nil {
+				return fmt.Errorf("invalid timeout duration: %w", err)
+			}
+			if diffTimeout <= 0 {
+				return fmt.Errorf("timeout must be positive")
+			}
+		}
+
 		return nil
 	}
 }

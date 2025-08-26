@@ -48,18 +48,30 @@ Execute with scoring (all I/O flags are required):
 ghost run -i input.txt -o output.txt -e stderr.txt --score 85 -- python script.py
 ```
 
+With timeout and verbose output:
+
+```bash
+ghost run -i input.txt -o output.txt -e stderr.txt --timeout 30s --verbose -- ./slow-command
+```
+
 ### Diff Command
 
 Compare two files and get structured output:
 
 ```bash
-ghost diff -i actual.txt -e expected.txt -o diff_output.txt
+ghost diff -i actual.txt -x expected.txt -o diff_output.txt -e stderr.txt
 ```
 
 Compare with scoring (score applies if files match):
 
 ```bash
-ghost diff -i actual.txt -e expected.txt -o diff_output.txt --score 100
+ghost diff -i actual.txt -x expected.txt -o diff_output.txt -e stderr.txt --score 100
+```
+
+With custom diff flags for grading:
+
+```bash
+ghost diff -i student.txt -x solution.txt -o diff.txt -e stderr.txt --diff-flags "--ignore-trailing-space"
 ```
 
 ## JSON Output
@@ -68,12 +80,30 @@ Ghost outputs execution results as JSON to stdout:
 
 ```json
 {
+  "command": "echo hello world",
+  "status": "success",
   "input": "input.txt",
   "output": "output.txt", 
   "stderr": "stderr.txt",
   "exit_code": 0,
   "execution_time": 590,
+  "timeout": 5000,
   "score": 85
+}
+```
+
+For diff commands, includes the expected field:
+
+```json
+{
+  "command": "diff file1.txt file2.txt",
+  "status": "failed",
+  "input": "file1.txt",
+  "expected": "file2.txt",
+  "output": "diff_output.txt",
+  "stderr": "stderr.txt",
+  "exit_code": 1,
+  "execution_time": 12
 }
 ```
 
@@ -84,7 +114,12 @@ Ghost outputs execution results as JSON to stdout:
 - **I/O Redirection**: Required redirection of stdin, stdout, and stderr to files
 - **File Comparison**: Built-in diff command for comparing files with structured output
 - **Execution Timing**: Precise execution time measurement in milliseconds
+- **Timeout Support**: Set execution time limits with automatic process termination
+- **Status Tracking**: Clear status indicators (success/failed/timeout)
+- **Verbose Mode**: Optionally display stderr on terminal while capturing to file
+- **Command Logging**: Full command string included in JSON output for auditing
 - **Score Tracking**: Optional scoring with conditional logic
+- **Diff Flags**: Pass custom flags to diff for flexible comparison (e.g., ignore whitespace)
 - **Structured Output**: JSON format for easy parsing and automation
 - **Exit Code Capture**: Reliable exit code reporting
 - **Auto Directory Creation**: Parent directories are created automatically for output files

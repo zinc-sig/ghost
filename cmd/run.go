@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zinc-sig/ghost/internal/runner"
@@ -12,6 +13,8 @@ var (
 	outputFile string
 	stderrFile string
 	verbose    bool
+	timeoutStr string
+	timeout    time.Duration
 	score      int
 	scoreSet   bool
 )
@@ -60,6 +63,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		OutputFile: outputFile,
 		StderrFile: stderrFile,
 		Verbose:    verbose,
+		Timeout:    timeout,
 	}
 
 	result, err := runner.Execute(config)
@@ -68,11 +72,16 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create JSON result using common function
+	var timeoutMs int64
+	if timeout > 0 {
+		timeoutMs = timeout.Milliseconds()
+	}
 	jsonResult := createJSONResult(
 		config.InputFile,
 		config.OutputFile,
 		config.StderrFile,
 		result,
+		timeoutMs,
 		scoreSet,
 		score,
 	)
@@ -86,6 +95,7 @@ func init() {
 	runCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Output file to capture command's stdout (required)")
 	runCmd.Flags().StringVarP(&stderrFile, "stderr", "e", "", "Error file to capture command's stderr (required)")
 	runCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show command stderr on terminal in addition to file")
+	runCmd.Flags().StringVarP(&timeoutStr, "timeout", "t", "", "Timeout duration (e.g., 30s, 2m, 500ms)")
 
 	// Mark flags as required
 	_ = runCmd.MarkFlagRequired("input")
@@ -95,6 +105,19 @@ func init() {
 
 	runCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
 		scoreSet = cmd.Flags().Changed("score")
+
+		// Parse timeout if provided
+		if timeoutStr != "" {
+			var err error
+			timeout, err = time.ParseDuration(timeoutStr)
+			if err != nil {
+				return fmt.Errorf("invalid timeout duration: %w", err)
+			}
+			if timeout <= 0 {
+				return fmt.Errorf("timeout must be positive")
+			}
+		}
+
 		return nil
 	}
 }
