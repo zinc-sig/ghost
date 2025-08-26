@@ -1,11 +1,9 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/zinc-sig/ghost/internal/output"
 	"github.com/zinc-sig/ghost/internal/runner"
 )
 
@@ -67,30 +65,18 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to execute command: %w", err)
 	}
 
-	jsonResult := &output.Result{
-		Input:         config.InputFile,
-		Output:        config.OutputFile,
-		Stderr:        config.StderrFile,
-		ExitCode:      result.ExitCode,
-		ExecutionTime: result.ExecutionTime,
-	}
+	// Create JSON result using common function
+	jsonResult := createJSONResult(
+		config.InputFile,
+		config.OutputFile,
+		config.StderrFile,
+		result,
+		scoreSet,
+		score,
+	)
 
-	if scoreSet {
-		if result.ExitCode == 0 {
-			jsonResult.Score = &score
-		} else {
-			zero := 0
-			jsonResult.Score = &zero
-		}
-	}
-
-	jsonOutput, err := json.Marshal(jsonResult)
-	if err != nil {
-		return fmt.Errorf("failed to marshal JSON output: %w", err)
-	}
-
-	fmt.Println(string(jsonOutput))
-	return nil
+	// Output JSON using common function
+	return outputJSON(jsonResult)
 }
 
 func init() {

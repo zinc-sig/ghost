@@ -22,6 +22,8 @@ go build -o ghost
 
 ## Quick Start
 
+### Run Command
+
 Execute a command with required input/output redirection:
 
 ```bash
@@ -32,6 +34,20 @@ Execute with scoring (all I/O flags are required):
 
 ```bash
 ghost run -i input.txt -o output.txt -e stderr.txt --score 85 -- python script.py
+```
+
+### Diff Command
+
+Compare two files and get structured output:
+
+```bash
+ghost diff -i actual.txt -e expected.txt -o diff_output.txt
+```
+
+Compare with scoring (score applies if files match):
+
+```bash
+ghost diff -i actual.txt -e expected.txt -o diff_output.txt --score 100
 ```
 
 ## JSON Output
@@ -54,10 +70,12 @@ Ghost outputs execution results as JSON to stdout:
 ## Features
 
 - **I/O Redirection**: Required redirection of stdin, stdout, and stderr to files
+- **File Comparison**: Built-in diff command for comparing files with structured output
 - **Execution Timing**: Precise execution time measurement in milliseconds
 - **Score Tracking**: Optional scoring with conditional logic
 - **Structured Output**: JSON format for easy parsing and automation
 - **Exit Code Capture**: Reliable exit code reporting
+- **Auto Directory Creation**: Parent directories are created automatically for output files
 - **POSIX Compliant**: Built with Cobra framework for professional CLI experience
 
 ## Use Cases

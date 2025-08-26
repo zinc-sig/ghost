@@ -1,12 +1,24 @@
 # Ghost Usage Guide
 
-## Command Structure
+## Commands
+
+Ghost provides two main commands:
+
+### Run Command
 
 ```
 ghost run [flags] -- <command> [args...]
 ```
 
 The `--` separator is required to distinguish ghost flags from the target command and its arguments.
+
+### Diff Command
+
+```
+ghost diff -i <input> -e <expected> -o <output> [--score <value>]
+```
+
+Compare two files and get structured JSON output with execution metadata.
 
 ## Flags
 
@@ -162,5 +174,77 @@ ghost run -i /dev/null -o deploy.log -e deploy_errors.log --score 100 -- ./deplo
 
 ```bash
 # Track execution times for performance analysis
-ghost run -i large_dataset.json -o processed.json -- ./data_processor
+ghost run -i large_dataset.json -o processed.json -e errors.log -- ./data_processor
 ```
+
+## Diff Command Examples
+
+### Basic File Comparison
+
+Compare two files without scoring:
+
+```bash
+ghost diff -i actual.txt -e expected.txt -o diff_output.txt
+```
+
+Output (files are identical):
+```json
+{
+  "input": "actual.txt",
+  "output": "expected.txt",
+  "stderr": "diff_output.txt",
+  "exit_code": 0,
+  "execution_time": 5
+}
+```
+
+Output (files differ):
+```json
+{
+  "input": "actual.txt",
+  "output": "expected.txt", 
+  "stderr": "diff_output.txt",
+  "exit_code": 1,
+  "execution_time": 7
+}
+```
+
+### File Comparison with Scoring
+
+Compare files with score (100 if match, 0 if different):
+
+```bash
+ghost diff -i student_output.txt -e solution.txt -o comparison.txt --score 100
+```
+
+### Test Output Validation
+
+```bash
+# Compare test output with expected result
+ghost diff -i test_output.txt -e expected_output.txt -o test_diff.txt --score 100
+
+# Check multiple test outputs
+for test in tests/*.out; do
+  expected="expected/$(basename $test)"
+  diff_file="diffs/$(basename $test .out).diff"
+  ghost diff -i "$test" -e "$expected" -o "$diff_file" --score 100
+done
+```
+
+### CI/CD Usage
+
+```bash
+# Verify configuration file matches template
+ghost diff -i config.yml -e config.template.yml -o config_diff.txt
+
+# Compare build artifacts
+ghost diff -i build/output.js -e reference/output.js -o build_diff.txt --score 100
+```
+
+### Notes on Diff Output
+
+- The diff output is written to the file specified by `-o`
+- Exit code 0 means files are identical
+- Exit code 1 means files differ
+- The actual diff content can be found in the output file
+- Score is included only when `--score` flag is used
