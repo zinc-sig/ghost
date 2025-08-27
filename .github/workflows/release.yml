@@ -119,7 +119,7 @@ jobs:
                 draft: false,
                 prerelease: false,
                 generate_release_notes: true,
-                make_latest: true
+                make_latest: 'true'
               })
               
               console.log(`Release created with ID: ${release.id}`)
