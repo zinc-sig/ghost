@@ -58,6 +58,23 @@ func Execute(config *Config) (*Result, error) {
 		fullCommand = fullCommand + " " + strings.Join(config.Args, " ")
 	}
 
+	// Print pre-execution context in verbose mode
+	if config.Verbose {
+		fmt.Fprintln(os.Stderr, "========================================")
+		fmt.Fprintln(os.Stderr, "Ghost Command Execution Details")
+		fmt.Fprintln(os.Stderr, "========================================")
+		fmt.Fprintf(os.Stderr, "Command: %s\n", fullCommand)
+		fmt.Fprintf(os.Stderr, "Input:   %s\n", config.InputFile)
+		fmt.Fprintf(os.Stderr, "Output:  %s\n", config.OutputFile)
+		fmt.Fprintf(os.Stderr, "Stderr:  %s\n", config.StderrFile)
+		if config.Timeout > 0 {
+			fmt.Fprintf(os.Stderr, "Timeout: %s\n", config.Timeout)
+		}
+		fmt.Fprintln(os.Stderr, "----------------------------------------")
+		fmt.Fprintln(os.Stderr, "Command Output:")
+		fmt.Fprintln(os.Stderr, "----------------------------------------")
+	}
+
 	// Create command with or without timeout
 	var cmd *exec.Cmd
 	var ctx context.Context
@@ -123,6 +140,17 @@ func Execute(config *Config) (*Result, error) {
 		} else {
 			return nil, fmt.Errorf("failed to start command: %w", err)
 		}
+	}
+
+	// Print post-execution status in verbose mode
+	if config.Verbose {
+		fmt.Fprintln(os.Stderr, "----------------------------------------")
+		fmt.Fprintln(os.Stderr, "Execution Results:")
+		fmt.Fprintln(os.Stderr, "----------------------------------------")
+		fmt.Fprintf(os.Stderr, "Status:         %s\n", status)
+		fmt.Fprintf(os.Stderr, "Exit Code:      %d\n", exitCode)
+		fmt.Fprintf(os.Stderr, "Execution Time: %d ms\n", executionTime)
+		fmt.Fprintln(os.Stderr, "========================================")
 	}
 
 	return &Result{
