@@ -22,18 +22,76 @@ jobs:
         with:
           go-version: '1.24.x'
 
-      - name: Get version
+      - name: Get latest tag and bump version
         id: version
-        run: |
-          VERSION=$(git describe --tags --always --dirty)
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "Building version: ${VERSION}"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Get the latest tag
+            const { data: tags } = await github.rest.repos.listTags({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 1
+            })
+            
+            let newVersion
+            if (tags.length > 0) {
+              const latestTag = tags[0].name
+              console.log(`Latest tag: ${latestTag}`)
+              
+              // Parse version (assuming format v1.2.3)
+              const versionMatch = latestTag.match(/v?(\d+)\.(\d+)\.(\d+)/)
+              if (versionMatch) {
+                const major = parseInt(versionMatch[1])
+                const minor = parseInt(versionMatch[2])
+                const patch = parseInt(versionMatch[3]) + 1
+                newVersion = `v${major}.${minor}.${patch}`
+              } else {
+                console.log('Could not parse version from tag, starting fresh')
+                newVersion = 'v0.0.1'
+              }
+            } else {
+              console.log('No tags found, starting with v0.0.1')
+              newVersion = 'v0.0.1'
+            }
+            
+            console.log(`New version: ${newVersion}`)
+            core.setOutput('new_version', newVersion)
+            core.setOutput('new_version_bare', newVersion.substring(1))
+            return newVersion
+
+      - name: Create new tag
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const newVersion = '${{ steps.version.outputs.new_version }}'
+            
+            try {
+              // Create lightweight tag
+              const { data: newTag } = await github.rest.git.createRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `refs/tags/${newVersion}`,
+                sha: context.sha
+              })
+              
+              console.log(`Successfully created tag ${newVersion}`)
+              console.log(`Tag SHA: ${newTag.object.sha}`)
+            } catch (error) {
+              // If tag already exists, skip creation
+              if (error.status === 422 && error.message.includes('already exists')) {
+                console.log(`Tag ${newVersion} already exists, skipping tag creation`)
+              } else {
+                throw error
+              }
+            }
 
       - name: Build binary
         run: |
           mkdir -p dist
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-            -ldflags="-s -w -extldflags '-static'" -o dist/ghost-linux-amd64
+            -ldflags="-s -w -extldflags '-static' -X main.Version=${{ steps.version.outputs.new_version }}" \
+            -o dist/ghost-linux-amd64
 
       - name: Create checksums
         run: |
@@ -42,15 +100,68 @@ jobs:
           echo "Checksums:"
           cat ghost-linux-amd64.sha256
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
+      - name: Create release and upload assets
+        uses: actions/github-script@v7
         with:
-          tag_name: ${{ steps.version.outputs.version }}
-          name: Release ${{ steps.version.outputs.version }}
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          make_latest: true
-          files: |
-            dist/ghost-linux-amd64
-            dist/ghost-linux-amd64.sha256
+          script: |
+            const fs = require('fs').promises
+            const path = require('path')
+            const newVersion = '${{ steps.version.outputs.new_version }}'
+            
+            try {
+              // Create release
+              console.log(`Creating release for ${newVersion}...`)
+              const { data: release } = await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: newVersion,
+                name: `Release ${newVersion}`,
+                draft: false,
+                prerelease: false,
+                generate_release_notes: true,
+                make_latest: true
+              })
+              
+              console.log(`Release created with ID: ${release.id}`)
+              console.log(`Release URL: ${release.html_url}`)
+              
+              // Upload binary
+              console.log('Uploading binary...')
+              const binaryPath = path.join(process.env.GITHUB_WORKSPACE, 'dist', 'ghost-linux-amd64')
+              const binaryData = await fs.readFile(binaryPath)
+              
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.id,
+                name: 'ghost-linux-amd64',
+                data: binaryData
+              })
+              
+              console.log('Binary uploaded successfully')
+              
+              // Upload checksum
+              console.log('Uploading checksum...')
+              const checksumPath = path.join(process.env.GITHUB_WORKSPACE, 'dist', 'ghost-linux-amd64.sha256')
+              const checksumData = await fs.readFile(checksumPath)
+              
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.id,
+                name: 'ghost-linux-amd64.sha256',
+                data: checksumData
+              })
+              
+              console.log('Checksum uploaded successfully')
+              console.log(`✅ Release ${newVersion} created successfully!`)
+              
+            } catch (error) {
+              // If release already exists, skip creation
+              if (error.status === 422 && error.message.includes('already_exists')) {
+                console.log(`Release ${newVersion} already exists, skipping release creation`)
+              } else {
+                console.error('Error creating release:', error.message)
+                throw error
+              }
+            }
