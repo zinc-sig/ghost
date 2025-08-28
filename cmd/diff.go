@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	contextparser "github.com/zinc-sig/ghost/internal/context"
 	"github.com/zinc-sig/ghost/internal/runner"
 )
 
@@ -20,6 +21,9 @@ var (
 	diffFlags        string
 	diffScore        int
 	diffScoreSet     bool
+	diffContextJSON  string
+	diffContextKV    []string
+	diffContextFile  string
 )
 
 var diffCmd = &cobra.Command{
@@ -89,6 +93,12 @@ func diffCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to execute diff: %w", err)
 	}
 
+	// Build context from all sources
+	ctx, err := contextparser.BuildContext(diffContextJSON, diffContextKV, diffContextFile)
+	if err != nil {
+		return fmt.Errorf("failed to build context: %w", err)
+	}
+
 	// Create JSON result for diff command
 	var timeoutMs int64
 	if diffTimeout > 0 {
@@ -103,6 +113,7 @@ func diffCommand(cmd *cobra.Command, args []string) error {
 		timeoutMs,
 		diffScoreSet,
 		diffScore,
+		ctx,
 	)
 
 	// Output JSON
@@ -125,6 +136,11 @@ func init() {
 	_ = diffCmd.MarkFlagRequired("stderr")
 
 	diffCmd.Flags().IntVar(&diffScore, "score", 0, "Optional score integer (included in output if files match)")
+
+	// Context flags
+	diffCmd.Flags().StringVar(&diffContextJSON, "context", "", "Context data as JSON string")
+	diffCmd.Flags().StringArrayVar(&diffContextKV, "context-kv", nil, "Context key=value pairs (can be used multiple times)")
+	diffCmd.Flags().StringVar(&diffContextFile, "context-file", "", "Path to JSON file containing context data")
 
 	diffCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
 		diffScoreSet = cmd.Flags().Changed("score")

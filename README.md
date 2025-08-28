@@ -54,6 +54,33 @@ With timeout and verbose output:
 ghost run -i input.txt -o output.txt -e stderr.txt --timeout 30s --verbose -- ./slow-command
 ```
 
+With context metadata:
+
+```bash
+# Using key-value pairs (with automatic type inference)
+ghost run -i input.txt -o output.txt -e stderr.txt \
+  --context-kv "student_id=s123" \
+  --context-kv "assignment=hw1" \
+  --context-kv "max_score=100" \
+  --context-kv "strict_mode=true" \
+  -- ./student_program
+
+# Using JSON string for complex structures
+ghost run -i input.txt -o output.txt -e stderr.txt \
+  --context '{"metadata": {"version": 2, "timestamp": "2024-01-01"}}' \
+  -- ./my-command
+
+# Using context file
+ghost run -i input.txt -o output.txt -e stderr.txt \
+  --context-file metadata.json \
+  -- ./my-command
+
+# Using environment variables
+GHOST_CONTEXT='{"batch": "2024"}' \
+GHOST_CONTEXT_USER_ID=123 \
+ghost run -i input.txt -o output.txt -e stderr.txt -- ./my-command
+```
+
 ### Diff Command
 
 Compare two files and get structured output:
@@ -74,6 +101,15 @@ With custom diff flags for grading:
 ghost diff -i student.txt -x solution.txt -o diff.txt -e stderr.txt --diff-flags "--ignore-trailing-space"
 ```
 
+With context for tracking test metadata:
+
+```bash
+ghost diff -i actual.txt -x expected.txt -o diff.txt -e stderr.txt \
+  --context-kv "test_case=5" \
+  --context-kv "suite=integration" \
+  --score 100
+```
+
 ## JSON Output
 
 Ghost outputs execution results as JSON to stdout:
@@ -88,7 +124,13 @@ Ghost outputs execution results as JSON to stdout:
   "exit_code": 0,
   "execution_time": 590,
   "timeout": 5000,
-  "score": 85
+  "score": 85,
+  "context": {
+    "student_id": "s123",
+    "assignment": "hw1",
+    "max_score": 100,
+    "strict_mode": true
+  }
 }
 ```
 
@@ -107,6 +149,18 @@ For diff commands, includes the expected field:
 }
 ```
 
+### Field Descriptions
+
+- **command**: The executed command as a string
+- **status**: Execution status ("success", "failed", or "timeout")
+- **input/output/stderr**: File paths for I/O redirection (required)
+- **expected**: File path for expected output (diff command only)
+- **exit_code**: Process exit code (0 for success, -1 for timeout)
+- **execution_time**: Command execution time in milliseconds
+- **timeout**: Timeout duration in milliseconds (optional)
+- **score**: Integer score value (optional, 0 if command fails)
+- **context**: Arbitrary JSON data for metadata (optional)
+
 **Note**: The `-i`, `-o`, and `-e` flags are mandatory for all command executions.
 
 ## Features
@@ -119,11 +173,56 @@ For diff commands, includes the expected field:
 - **Verbose Mode**: Optionally display stderr on terminal while capturing to file
 - **Command Logging**: Full command string included in JSON output for auditing
 - **Score Tracking**: Optional scoring with conditional logic
+- **Context Metadata**: Attach arbitrary JSON data to command executions via multiple input methods
+- **Type Inference**: Automatic detection of numbers and booleans in key-value pairs
 - **Diff Flags**: Pass custom flags to diff for flexible comparison (e.g., ignore whitespace)
 - **Structured Output**: JSON format for easy parsing and automation
 - **Exit Code Capture**: Reliable exit code reporting
 - **Auto Directory Creation**: Parent directories are created automatically for output files
 - **POSIX Compliant**: Built with Cobra framework for professional CLI experience
+
+## Context Support
+
+Ghost allows you to attach arbitrary metadata to command executions through the context field. This is useful for tracking test cases, user information, execution environments, or any other metadata relevant to your use case.
+
+### Input Methods
+
+1. **Key-Value Pairs** (`--context-kv`): Simple key=value format with automatic type inference
+   ```bash
+   --context-kv "user_id=123" --context-kv "enabled=true" --context-kv "score=95.5"
+   ```
+
+2. **JSON String** (`--context`): For complex nested structures
+   ```bash
+   --context '{"metadata": {"version": 2, "tags": ["test", "integration"]}}'
+   ```
+
+3. **File** (`--context-file`): Load context from a JSON file
+   ```bash
+   --context-file metadata.json
+   ```
+
+4. **Environment Variables**: Set context through environment
+   ```bash
+   GHOST_CONTEXT='{"env": "production"}'  # JSON object
+   GHOST_CONTEXT_USER_ID=123               # Individual keys (lowercased)
+   GHOST_CONTEXT_DEBUG=true                # With type inference
+   ```
+
+### Precedence Rules
+
+When the same key appears in multiple sources, the precedence order is:
+1. Key-value pairs (highest priority)
+2. JSON string flag
+3. Context file
+4. Environment variables (lowest priority)
+
+### Type Inference
+
+When using `--context-kv` or `GHOST_CONTEXT_*` environment variables, Ghost automatically infers types:
+- Numbers: `"123"` → `123`, `"3.14"` → `3.14`
+- Booleans: `"true"` → `true`, `"false"` → `false`
+- Strings: Everything else remains as strings
 
 ## Use Cases
 

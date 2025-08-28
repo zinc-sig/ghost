@@ -5,18 +5,22 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	contextparser "github.com/zinc-sig/ghost/internal/context"
 	"github.com/zinc-sig/ghost/internal/runner"
 )
 
 var (
-	inputFile  string
-	outputFile string
-	stderrFile string
-	verbose    bool
-	timeoutStr string
-	timeout    time.Duration
-	score      int
-	scoreSet   bool
+	inputFile   string
+	outputFile  string
+	stderrFile  string
+	verbose     bool
+	timeoutStr  string
+	timeout     time.Duration
+	score       int
+	scoreSet    bool
+	contextJSON string
+	contextKV   []string
+	contextFile string
 )
 
 var runCmd = &cobra.Command{
@@ -71,6 +75,12 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to execute command: %w", err)
 	}
 
+	// Build context from all sources
+	ctx, err := contextparser.BuildContext(contextJSON, contextKV, contextFile)
+	if err != nil {
+		return fmt.Errorf("failed to build context: %w", err)
+	}
+
 	// Create JSON result using common function
 	var timeoutMs int64
 	if timeout > 0 {
@@ -84,6 +94,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		timeoutMs,
 		scoreSet,
 		score,
+		ctx,
 	)
 
 	// Output JSON using common function
@@ -102,6 +113,11 @@ func init() {
 	_ = runCmd.MarkFlagRequired("output")
 	_ = runCmd.MarkFlagRequired("stderr")
 	runCmd.Flags().IntVar(&score, "score", 0, "Optional score integer (included in output if exit code is 0)")
+
+	// Context flags
+	runCmd.Flags().StringVar(&contextJSON, "context", "", "Context data as JSON string")
+	runCmd.Flags().StringArrayVar(&contextKV, "context-kv", nil, "Context key=value pairs (can be used multiple times)")
+	runCmd.Flags().StringVar(&contextFile, "context-file", "", "Path to JSON file containing context data")
 
 	runCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
 		scoreSet = cmd.Flags().Changed("score")
