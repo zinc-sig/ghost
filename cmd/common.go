@@ -84,25 +84,25 @@ func outputJSON(result *output.Result) error {
 	return nil
 }
 
-// Global webhook configuration variables
+// Global webhook configuration variables (internal use)
 var (
-	webhookConfig      *webhook.Config
-	webhookRetryConfig *webhook.RetryConfig
-	diffWebhookConfig  *webhook.Config
-	diffRetryConfig    *webhook.RetryConfig
+	runWebhookConfigParsed  *webhook.Config
+	runRetryConfig          *webhook.RetryConfig
+	diffWebhookConfigParsed *webhook.Config
+	diffRetryConfig         *webhook.RetryConfig
 )
 
 // parseWebhookConfig parses webhook configuration for run command
-func parseWebhookConfig() error {
-	if webhookURL == "" {
+func parseWebhookConfig(config *WebhookConfig) error {
+	if config.URL == "" {
 		return nil // No webhook configured
 	}
 
 	// Parse webhook timeout
 	var webhookTimeoutDur time.Duration
-	if webhookTimeout != "" {
+	if config.Timeout != "" {
 		var err error
-		webhookTimeoutDur, err = time.ParseDuration(webhookTimeout)
+		webhookTimeoutDur, err = time.ParseDuration(config.Timeout)
 		if err != nil {
 			return fmt.Errorf("invalid webhook timeout duration: %w", err)
 		}
@@ -112,9 +112,9 @@ func parseWebhookConfig() error {
 
 	// Parse retry delay
 	var retryDelay time.Duration
-	if webhookRetryDelay != "" {
+	if config.RetryDelay != "" {
 		var err error
-		retryDelay, err = time.ParseDuration(webhookRetryDelay)
+		retryDelay, err = time.ParseDuration(config.RetryDelay)
 		if err != nil {
 			return fmt.Errorf("invalid webhook retry delay: %w", err)
 		}
@@ -122,16 +122,16 @@ func parseWebhookConfig() error {
 		retryDelay = 1 * time.Second
 	}
 
-	webhookConfig = &webhook.Config{
-		URL:       webhookURL,
+	runWebhookConfigParsed = &webhook.Config{
+		URL:       config.URL,
 		Method:    "POST",
 		Timeout:   webhookTimeoutDur,
-		AuthType:  webhookAuthType,
-		AuthToken: webhookAuthToken,
+		AuthType:  config.AuthType,
+		AuthToken: config.AuthToken,
 	}
 
-	webhookRetryConfig = &webhook.RetryConfig{
-		MaxRetries:   webhookRetries,
+	runRetryConfig = &webhook.RetryConfig{
+		MaxRetries:   config.Retries,
 		InitialDelay: retryDelay,
 		MaxDelay:     30 * time.Second,
 		Multiplier:   2.0,
@@ -141,16 +141,16 @@ func parseWebhookConfig() error {
 }
 
 // parseDiffWebhookConfig parses webhook configuration for diff command
-func parseDiffWebhookConfig() error {
-	if diffWebhookURL == "" {
+func parseDiffWebhookConfig(config *WebhookConfig) error {
+	if config.URL == "" {
 		return nil // No webhook configured
 	}
 
 	// Parse webhook timeout
 	var webhookTimeoutDur time.Duration
-	if diffWebhookTimeout != "" {
+	if config.Timeout != "" {
 		var err error
-		webhookTimeoutDur, err = time.ParseDuration(diffWebhookTimeout)
+		webhookTimeoutDur, err = time.ParseDuration(config.Timeout)
 		if err != nil {
 			return fmt.Errorf("invalid webhook timeout duration: %w", err)
 		}
@@ -160,9 +160,9 @@ func parseDiffWebhookConfig() error {
 
 	// Parse retry delay
 	var retryDelay time.Duration
-	if diffWebhookRetryDelay != "" {
+	if config.RetryDelay != "" {
 		var err error
-		retryDelay, err = time.ParseDuration(diffWebhookRetryDelay)
+		retryDelay, err = time.ParseDuration(config.RetryDelay)
 		if err != nil {
 			return fmt.Errorf("invalid webhook retry delay: %w", err)
 		}
@@ -170,16 +170,16 @@ func parseDiffWebhookConfig() error {
 		retryDelay = 1 * time.Second
 	}
 
-	diffWebhookConfig = &webhook.Config{
-		URL:       diffWebhookURL,
+	diffWebhookConfigParsed = &webhook.Config{
+		URL:       config.URL,
 		Method:    "POST",
 		Timeout:   webhookTimeoutDur,
-		AuthType:  diffWebhookAuthType,
-		AuthToken: diffWebhookAuthToken,
+		AuthType:  config.AuthType,
+		AuthToken: config.AuthToken,
 	}
 
 	diffRetryConfig = &webhook.RetryConfig{
-		MaxRetries:   diffWebhookRetries,
+		MaxRetries:   config.Retries,
 		InitialDelay: retryDelay,
 		MaxDelay:     30 * time.Second,
 		Multiplier:   2.0,
@@ -196,11 +196,11 @@ func outputJSONAndWebhook(result *output.Result, verbose bool) error {
 
 	// Check if this is a diff command by looking for Expected field
 	if result.Expected != nil {
-		config = diffWebhookConfig
+		config = diffWebhookConfigParsed
 		retryConfig = diffRetryConfig
 	} else {
-		config = webhookConfig
-		retryConfig = webhookRetryConfig
+		config = runWebhookConfigParsed
+		retryConfig = runRetryConfig
 	}
 
 	// Send webhook if configured (before outputting to stdout)

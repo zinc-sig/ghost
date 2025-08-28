@@ -147,8 +147,8 @@ func TestDiffCommand(t *testing.T) {
 			diffOutputFile = outputFile
 			diffStderrFile = stderrFile
 			diffFlags = ""
-			diffScoreSet = tt.useScore
-			diffScore = tt.score
+			diffCommonFlags.ScoreSet = tt.useScore
+			diffCommonFlags.Score = tt.score
 
 			// Capture output
 			output, err := captureOutput(func() error {
@@ -293,7 +293,7 @@ func TestDiffCommandWithNestedDirectories(t *testing.T) {
 	diffOutputFile = outputFile
 	diffStderrFile = stderrFile
 	diffFlags = ""
-	diffScoreSet = false
+	diffCommonFlags.ScoreSet = false
 
 	// Run command
 	_, err := captureOutput(func() error {
@@ -466,8 +466,8 @@ func TestDiffCommandWithFlags(t *testing.T) {
 			diffOutputFile = outputFile
 			diffStderrFile = stderrFile
 			diffFlags = tt.diffFlags
-			diffScoreSet = tt.useScore
-			diffScore = tt.score
+			diffCommonFlags.ScoreSet = tt.useScore
+			diffCommonFlags.Score = tt.score
 
 			// Capture output
 			output, err := captureOutput(func() error {

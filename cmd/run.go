@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"time"
+	"os"
 
 	"github.com/spf13/cobra"
 	contextparser "github.com/zinc-sig/ghost/internal/context"
@@ -10,25 +10,16 @@ import (
 )
 
 var (
-	inputFile   string
-	outputFile  string
-	stderrFile  string
-	verbose     bool
-	timeoutStr  string
-	timeout     time.Duration
-	score       int
-	scoreSet    bool
-	contextJSON string
-	contextKV   []string
-	contextFile string
+	// Command-specific I/O flags
+	inputFile  string
+	outputFile string
+	stderrFile string
 
-	// Webhook configuration
-	webhookURL        string
-	webhookAuthType   string
-	webhookAuthToken  string
-	webhookTimeout    string
-	webhookRetries    int
-	webhookRetryDelay string
+	// Common flag structures
+	runFlags         CommonFlags
+	runContextConfig ContextConfig
+	runUploadConfig  UploadConfig
+	runWebhookConfig WebhookConfig
 )
 
 var runCmd = &cobra.Command{
@@ -68,14 +59,48 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	targetCommand := args[0]
 	targetArgs := args[1:]
 
+	// Setup upload provider if configured
+	provider, uploadConf, err := SetupUploadProvider(&runUploadConfig)
+	if err != nil {
+		return err
+	}
+
+	// Print upload info in verbose mode
+	if provider != nil && runFlags.Verbose {
+		PrintUploadInfo(provider, uploadConf, outputFile, stderrFile)
+	}
+
+	// Determine actual execution paths
+	actualOutputFile := outputFile
+	actualStderrFile := stderrFile
+
+	if provider != nil {
+		// Create temp files for execution when upload is configured
+		tempOut, err := os.CreateTemp("", "ghost-output-*.txt")
+		if err != nil {
+			return fmt.Errorf("failed to create temp output file: %w", err)
+		}
+		defer func() { _ = os.Remove(tempOut.Name()) }()
+		actualOutputFile = tempOut.Name()
+		_ = tempOut.Close()
+
+		tempErr, err := os.CreateTemp("", "ghost-stderr-*.txt")
+		if err != nil {
+			return fmt.Errorf("failed to create temp stderr file: %w", err)
+		}
+		defer func() { _ = os.Remove(tempErr.Name()) }()
+		actualStderrFile = tempErr.Name()
+		_ = tempErr.Close()
+	}
+
 	config := &runner.Config{
 		Command:    targetCommand,
 		Args:       targetArgs,
 		InputFile:  inputFile,
-		OutputFile: outputFile,
-		StderrFile: stderrFile,
-		Verbose:    verbose,
-		Timeout:    timeout,
+		OutputFile: actualOutputFile,
+		StderrFile: actualStderrFile,
+		Verbose:    runFlags.Verbose,
+		Timeout:    runFlags.Timeout,
 	}
 
 	result, err := runner.Execute(config)
@@ -83,16 +108,27 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to execute command: %w", err)
 	}
 
+	// Upload files if provider is configured
+	if provider != nil {
+		files := map[string]string{
+			actualOutputFile: outputFile,
+			actualStderrFile: stderrFile,
+		}
+		if err := HandleUploads(provider, files, runFlags.Verbose); err != nil {
+			return err
+		}
+	}
+
 	// Build context from all sources
-	ctx, err := contextparser.BuildContext(contextJSON, contextKV, contextFile)
+	ctxData, err := contextparser.BuildContext(runContextConfig.JSON, runContextConfig.KV, runContextConfig.File)
 	if err != nil {
 		return fmt.Errorf("failed to build context: %w", err)
 	}
 
 	// Create JSON result using common function
 	var timeoutMs int64
-	if timeout > 0 {
-		timeoutMs = timeout.Milliseconds()
+	if runFlags.Timeout > 0 {
+		timeoutMs = runFlags.Timeout.Milliseconds()
 	}
 	jsonResult := createJSONResult(
 		config.InputFile,
@@ -100,58 +136,44 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		config.StderrFile,
 		result,
 		timeoutMs,
-		scoreSet,
-		score,
-		ctx,
+		runFlags.ScoreSet,
+		runFlags.Score,
+		ctxData,
 	)
 
 	// Output JSON and send webhook using common function
-	return outputJSONAndWebhook(jsonResult, verbose)
+	return outputJSONAndWebhook(jsonResult, runFlags.Verbose)
 }
 
 func init() {
+	// Command-specific flags
 	runCmd.Flags().StringVarP(&inputFile, "input", "i", "", "Input file to redirect to command's stdin (required)")
 	runCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Output file to capture command's stdout (required)")
 	runCmd.Flags().StringVarP(&stderrFile, "stderr", "e", "", "Error file to capture command's stderr (required)")
-	runCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show command stderr on terminal in addition to file")
-	runCmd.Flags().StringVarP(&timeoutStr, "timeout", "t", "", "Timeout duration (e.g., 30s, 2m, 500ms)")
 
 	// Mark flags as required
 	_ = runCmd.MarkFlagRequired("input")
 	_ = runCmd.MarkFlagRequired("output")
 	_ = runCmd.MarkFlagRequired("stderr")
-	runCmd.Flags().IntVar(&score, "score", 0, "Optional score integer (included in output if exit code is 0)")
 
-	// Context flags
-	runCmd.Flags().StringVar(&contextJSON, "context", "", "Context data as JSON string")
-	runCmd.Flags().StringArrayVar(&contextKV, "context-kv", nil, "Context key=value pairs (can be used multiple times)")
-	runCmd.Flags().StringVar(&contextFile, "context-file", "", "Path to JSON file containing context data")
-
-	// Webhook flags
-	runCmd.Flags().StringVar(&webhookURL, "webhook-url", "", "Webhook URL to send results to")
-	runCmd.Flags().StringVar(&webhookAuthType, "webhook-auth-type", "none", "Authentication type: none, bearer, api-key")
-	runCmd.Flags().StringVar(&webhookAuthToken, "webhook-auth-token", "", "Authentication token (use with --webhook-auth-type)")
-	runCmd.Flags().IntVar(&webhookRetries, "webhook-retries", 3, "Maximum webhook retry attempts (0 = no retries)")
-	runCmd.Flags().StringVar(&webhookRetryDelay, "webhook-retry-delay", "1s", "Initial delay between webhook retries")
-	runCmd.Flags().StringVar(&webhookTimeout, "webhook-timeout", "30s", "Total timeout for webhook including retries")
+	// Setup common flags using helper
+	SetupCommonFlags(runCmd, &runFlags)
+	SetupContextFlags(runCmd, &runContextConfig)
+	SetupUploadFlags(runCmd, &runUploadConfig)
+	SetupWebhookFlags(runCmd, &runWebhookConfig)
 
 	runCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
-		scoreSet = cmd.Flags().Changed("score")
+		runFlags.ScoreSet = cmd.Flags().Changed("score")
 
 		// Parse timeout if provided
-		if timeoutStr != "" {
-			var err error
-			timeout, err = time.ParseDuration(timeoutStr)
-			if err != nil {
-				return fmt.Errorf("invalid timeout duration: %w", err)
-			}
-			if timeout <= 0 {
-				return fmt.Errorf("timeout must be positive")
-			}
+		var err error
+		runFlags.Timeout, err = SetupTimeoutPreRun(runFlags.TimeoutStr)
+		if err != nil {
+			return err
 		}
 
 		// Parse webhook configuration
-		if err := parseWebhookConfig(); err != nil {
+		if err := parseWebhookConfig(&runWebhookConfig); err != nil {
 			return err
 		}
 

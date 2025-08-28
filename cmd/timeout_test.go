@@ -10,10 +10,10 @@ import (
 
 // resetTimeoutGlobals resets timeout-related globals for tests
 func resetTimeoutGlobals() {
-	timeoutStr = ""
-	timeout = 0
-	diffTimeoutStr = ""
-	diffTimeout = 0
+	runFlags.TimeoutStr = ""
+	runFlags.Timeout = 0
+	diffCommonFlags.TimeoutStr = ""
+	diffCommonFlags.Timeout = 0
 }
 
 func TestRunCommandTimeout(t *testing.T) {
@@ -68,8 +68,8 @@ func TestRunCommandTimeout(t *testing.T) {
 			// Reset globals before each test
 			resetTimeoutGlobals()
 			// Also reset webhook globals
-			webhookTimeout = "30s"
-			diffWebhookTimeout = "30s"
+			runWebhookConfig.Timeout = "30s"
+			diffWebhookConfig.Timeout = "30s"
 
 			// Create temporary directory
 			dir, err := os.MkdirTemp("", "test")
@@ -176,8 +176,8 @@ func TestDiffCommandTimeout(t *testing.T) {
 			// Reset globals before each test
 			resetTimeoutGlobals()
 			// Also reset webhook globals
-			webhookTimeout = "30s"
-			diffWebhookTimeout = "30s"
+			runWebhookConfig.Timeout = "30s"
+			diffWebhookConfig.Timeout = "30s"
 
 			// Create temporary directory
 			dir, err := os.MkdirTemp("", "test")
