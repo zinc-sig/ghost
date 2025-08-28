@@ -48,6 +48,52 @@ Execute with scoring (all I/O flags are required):
 ghost run -i input.txt -o output.txt -e stderr.txt --score 85 -- python script.py
 ```
 
+### Upload Support
+
+Ghost supports uploading output files to remote storage providers like MinIO/S3. When upload is configured, files are written to temporary locations during execution and then uploaded to the specified remote paths.
+
+Upload to MinIO with configuration:
+
+```bash
+ghost run -i /dev/null -o results/output.txt -e results/stderr.txt \
+  --upload-provider minio \
+  --upload-config-kv "endpoint=localhost:9000" \
+  --upload-config-kv "access_key=minioadmin" \
+  --upload-config-kv "secret_key=minioadmin" \
+  --upload-config-kv "bucket=ghost-results" \
+  --upload-config-kv "prefix=tests/" \
+  -- echo "Hello World"
+```
+
+Using environment variables for upload configuration:
+
+```bash
+export GHOST_UPLOAD_CONFIG_ENDPOINT=localhost:9000
+export GHOST_UPLOAD_CONFIG_ACCESS_KEY=minioadmin
+export GHOST_UPLOAD_CONFIG_SECRET_KEY=minioadmin
+export GHOST_UPLOAD_CONFIG_BUCKET=ghost-results
+export GHOST_UPLOAD_CONFIG_PREFIX=tests/
+
+ghost run -i /dev/null -o output.txt -e stderr.txt \
+  --upload-provider minio \
+  -- echo "Hello World"
+```
+
+Using JSON configuration:
+
+```bash
+ghost run -i /dev/null -o output.txt -e stderr.txt \
+  --upload-provider minio \
+  --upload-config '{
+    "endpoint": "localhost:9000",
+    "access_key": "minioadmin",
+    "secret_key": "minioadmin",
+    "bucket": "ghost-results",
+    "prefix": "tests/"
+  }' \
+  -- echo "Hello World"
+```
+
 With timeout and verbose output:
 
 ```bash
