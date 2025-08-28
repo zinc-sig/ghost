@@ -279,7 +279,7 @@ func TestParseEnv(t *testing.T) {
 		os.Clearenv()
 		for _, env := range oldEnv {
 			kv := splitEnv(env)
-			os.Setenv(kv[0], kv[1])
+			_ = os.Setenv(kv[0], kv[1])
 		}
 	}()
 
@@ -363,7 +363,7 @@ func TestParseEnv(t *testing.T) {
 			// Clear env and set test vars
 			os.Clearenv()
 			for k, v := range tt.envVars {
-				os.Setenv(k, v)
+				_ = os.Setenv(k, v)
 			}
 
 			got := ParseEnv()
@@ -452,7 +452,7 @@ func TestBuildContext(t *testing.T) {
 		os.Clearenv()
 		for _, env := range oldEnv {
 			kv := splitEnv(env)
-			os.Setenv(kv[0], kv[1])
+			_ = os.Setenv(kv[0], kv[1])
 		}
 	}()
 
@@ -461,7 +461,7 @@ func TestBuildContext(t *testing.T) {
 
 	// Create a context file
 	contextFile := filepath.Join(tmpDir, "context.json")
-	os.WriteFile(contextFile, []byte(`{"file": "data", "override": "file"}`), 0644)
+	_ = os.WriteFile(contextFile, []byte(`{"file": "data", "override": "file"}`), 0644)
 
 	tests := []struct {
 		name     string
@@ -560,7 +560,7 @@ func TestBuildContext(t *testing.T) {
 			// Clear env and set test vars
 			os.Clearenv()
 			for k, v := range tt.envVars {
-				os.Setenv(k, v)
+				_ = os.Setenv(k, v)
 			}
 
 			got, err := BuildContext(tt.jsonStr, tt.kvPairs, tt.filePath)

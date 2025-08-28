@@ -10,17 +10,17 @@ import (
 )
 
 var (
-	inputFile       string
-	outputFile      string
-	stderrFile      string
-	verbose         bool
-	timeoutStr      string
-	timeout         time.Duration
-	score           int
-	scoreSet        bool
-	contextJSON     string
-	contextKV       []string
-	contextFile     string
+	inputFile   string
+	outputFile  string
+	stderrFile  string
+	verbose     bool
+	timeoutStr  string
+	timeout     time.Duration
+	score       int
+	scoreSet    bool
+	contextJSON string
+	contextKV   []string
+	contextFile string
 )
 
 var runCmd = &cobra.Command{

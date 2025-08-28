@@ -92,7 +92,7 @@ func TestExecuteWithTimeout(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer os.RemoveAll(dir)
+			defer func() { _ = os.RemoveAll(dir) }()
 
 			// Create input file
 			inputFile := filepath.Join(dir, "input.txt")
