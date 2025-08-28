@@ -161,7 +161,7 @@ func HandleUploads(provider upload.Provider, files map[string]string, verbose bo
 		if err != nil {
 			return fmt.Errorf("failed to open %s for upload: %w", localPath, err)
 		}
-		defer reader.Close()
+		defer func() { _ = reader.Close() }()
 
 		if err := provider.Upload(ctx, reader, remotePath); err != nil {
 			return fmt.Errorf("failed to upload to %s: %w", remotePath, err)
@@ -198,4 +198,3 @@ func PrintUploadInfo(provider upload.Provider, config map[string]any, outputPath
 	fmt.Fprintf(os.Stderr, "Stderr Path:    %s\n", stderrPath)
 	fmt.Fprintln(os.Stderr, "----------------------------------------")
 }
-

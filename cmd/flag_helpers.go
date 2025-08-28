@@ -56,4 +56,3 @@ func SetupWebhookFlags(cmd *cobra.Command, config *WebhookConfig) {
 	cmd.Flags().StringVar(&config.RetryDelay, "webhook-retry-delay", "1s", "Initial delay between webhook retries")
 	cmd.Flags().StringVar(&config.Timeout, "webhook-timeout", "30s", "Total timeout for webhook including retries")
 }
-

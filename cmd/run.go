@@ -80,17 +80,17 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to create temp output file: %w", err)
 		}
-		defer os.Remove(tempOut.Name())
+		defer func() { _ = os.Remove(tempOut.Name()) }()
 		actualOutputFile = tempOut.Name()
-		tempOut.Close()
+		_ = tempOut.Close()
 
 		tempErr, err := os.CreateTemp("", "ghost-stderr-*.txt")
 		if err != nil {
 			return fmt.Errorf("failed to create temp stderr file: %w", err)
 		}
-		defer os.Remove(tempErr.Name())
+		defer func() { _ = os.Remove(tempErr.Name()) }()
 		actualStderrFile = tempErr.Name()
-		tempErr.Close()
+		_ = tempErr.Close()
 	}
 
 	config := &runner.Config{
@@ -180,4 +180,3 @@ func init() {
 		return nil
 	}
 }
-

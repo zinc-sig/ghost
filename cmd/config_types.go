@@ -35,4 +35,3 @@ type WebhookConfig struct {
 	Retries    int
 	RetryDelay string
 }
-
