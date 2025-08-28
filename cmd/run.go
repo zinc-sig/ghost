@@ -21,6 +21,14 @@ var (
 	contextJSON string
 	contextKV   []string
 	contextFile string
+
+	// Webhook configuration
+	webhookURL        string
+	webhookAuthType   string
+	webhookAuthToken  string
+	webhookTimeout    string
+	webhookRetries    int
+	webhookRetryDelay string
 )
 
 var runCmd = &cobra.Command{
@@ -97,8 +105,8 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		ctx,
 	)
 
-	// Output JSON using common function
-	return outputJSON(jsonResult)
+	// Output JSON and send webhook using common function
+	return outputJSONAndWebhook(jsonResult, verbose)
 }
 
 func init() {
@@ -119,6 +127,14 @@ func init() {
 	runCmd.Flags().StringArrayVar(&contextKV, "context-kv", nil, "Context key=value pairs (can be used multiple times)")
 	runCmd.Flags().StringVar(&contextFile, "context-file", "", "Path to JSON file containing context data")
 
+	// Webhook flags
+	runCmd.Flags().StringVar(&webhookURL, "webhook-url", "", "Webhook URL to send results to")
+	runCmd.Flags().StringVar(&webhookAuthType, "webhook-auth-type", "none", "Authentication type: none, bearer, api-key")
+	runCmd.Flags().StringVar(&webhookAuthToken, "webhook-auth-token", "", "Authentication token (use with --webhook-auth-type)")
+	runCmd.Flags().IntVar(&webhookRetries, "webhook-retries", 3, "Maximum webhook retry attempts (0 = no retries)")
+	runCmd.Flags().StringVar(&webhookRetryDelay, "webhook-retry-delay", "1s", "Initial delay between webhook retries")
+	runCmd.Flags().StringVar(&webhookTimeout, "webhook-timeout", "30s", "Total timeout for webhook including retries")
+
 	runCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
 		scoreSet = cmd.Flags().Changed("score")
 
@@ -132,6 +148,11 @@ func init() {
 			if timeout <= 0 {
 				return fmt.Errorf("timeout must be positive")
 			}
+		}
+
+		// Parse webhook configuration
+		if err := parseWebhookConfig(); err != nil {
+			return err
 		}
 
 		return nil

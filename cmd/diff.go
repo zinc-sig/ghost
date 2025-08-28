@@ -24,6 +24,14 @@ var (
 	diffContextJSON  string
 	diffContextKV    []string
 	diffContextFile  string
+
+	// Webhook configuration for diff
+	diffWebhookURL        string
+	diffWebhookAuthType   string
+	diffWebhookAuthToken  string
+	diffWebhookTimeout    string
+	diffWebhookRetries    int
+	diffWebhookRetryDelay string
 )
 
 var diffCmd = &cobra.Command{
@@ -116,8 +124,8 @@ func diffCommand(cmd *cobra.Command, args []string) error {
 		ctx,
 	)
 
-	// Output JSON
-	return outputJSON(jsonResult)
+	// Output JSON and send webhook
+	return outputJSONAndWebhook(jsonResult, diffVerbose)
 }
 
 func init() {
@@ -142,6 +150,14 @@ func init() {
 	diffCmd.Flags().StringArrayVar(&diffContextKV, "context-kv", nil, "Context key=value pairs (can be used multiple times)")
 	diffCmd.Flags().StringVar(&diffContextFile, "context-file", "", "Path to JSON file containing context data")
 
+	// Webhook flags for diff
+	diffCmd.Flags().StringVar(&diffWebhookURL, "webhook-url", "", "Webhook URL to send results to")
+	diffCmd.Flags().StringVar(&diffWebhookAuthType, "webhook-auth-type", "none", "Authentication type: none, bearer, api-key")
+	diffCmd.Flags().StringVar(&diffWebhookAuthToken, "webhook-auth-token", "", "Authentication token (use with --webhook-auth-type)")
+	diffCmd.Flags().IntVar(&diffWebhookRetries, "webhook-retries", 3, "Maximum webhook retry attempts (0 = no retries)")
+	diffCmd.Flags().StringVar(&diffWebhookRetryDelay, "webhook-retry-delay", "1s", "Initial delay between webhook retries")
+	diffCmd.Flags().StringVar(&diffWebhookTimeout, "webhook-timeout", "30s", "Total timeout for webhook including retries")
+
 	diffCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
 		diffScoreSet = cmd.Flags().Changed("score")
 
@@ -155,6 +171,11 @@ func init() {
 			if diffTimeout <= 0 {
 				return fmt.Errorf("timeout must be positive")
 			}
+		}
+
+		// Parse webhook configuration for diff
+		if err := parseDiffWebhookConfig(); err != nil {
+			return err
 		}
 
 		return nil

@@ -43,6 +43,34 @@ test-output:
 test-cmd:
     go test -v ./cmd
 
+# Run webhook package tests
+test-webhook:
+    go test -v ./internal/webhook
+
+# Run webhook integration tests
+test-webhook-integration:
+    go test -v ./cmd -run TestRunCommand_WithWebhook
+    go test -v ./cmd -run TestRunCommand_WebhookAuth
+    go test -v ./cmd -run TestRunCommand_WebhookRetry
+    go test -v ./cmd -run TestRunCommand_WebhookFailure
+    go test -v ./cmd -run TestDiffCommand_WithWebhook
+
+# Test webhook with a mock server
+test-webhook-mock: build
+    @echo "Testing webhook with mock server..."
+    @bash -c 'set -e; \
+        # Start a simple HTTP server that logs requests \
+        python3 -m http.server 8888 > /dev/null 2>&1 & SERVER_PID=$$!; \
+        sleep 1; \
+        echo "" > /tmp/input.txt; \
+        ./bin/ghost run -i /tmp/input.txt -o /tmp/out.txt -e /tmp/err.txt \
+            --webhook-url http://localhost:8888/webhook \
+            --webhook-retries 0 \
+            -- echo "test webhook" 2>/dev/null | jq -e ".webhook_sent == false" > /dev/null; \
+        kill $$SERVER_PID 2>/dev/null || true; \
+        rm -f /tmp/input.txt /tmp/out.txt /tmp/err.txt; \
+        echo "✓ Webhook test completed"'
+
 # Run benchmarks
 bench:
     go test -bench=. -benchmem ./...
