@@ -127,10 +127,10 @@ func (c *Client) sendRequest(ctx context.Context, payload []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Drain response body to reuse connection
-	io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	return resp.StatusCode, nil
 }

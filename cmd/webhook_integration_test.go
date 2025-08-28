@@ -110,9 +110,9 @@ func TestRunCommand_WithWebhook(t *testing.T) {
 	}
 
 	// Close writer and read output
-	w.Close()
+	_ = w.Close()
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 
 	// Parse stdout JSON
 	var stdoutResult output.Result
@@ -221,8 +221,8 @@ func TestRunCommand_WithWebhookAuth(t *testing.T) {
 				t.Fatalf("Command failed: %v", err)
 			}
 
-			w.Close()
-			io.Copy(io.Discard, r)
+			_ = w.Close()
+			_, _ = io.Copy(io.Discard, r)
 		})
 	}
 }
@@ -279,9 +279,9 @@ func TestRunCommand_WebhookRetry(t *testing.T) {
 		t.Fatalf("Command failed: %v", err)
 	}
 
-	w.Close()
+	_ = w.Close()
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 
 	// Parse stdout JSON
 	var result output.Result
@@ -351,12 +351,12 @@ func TestRunCommand_WebhookFailure(t *testing.T) {
 		t.Fatalf("Command should not fail due to webhook error: %v", err)
 	}
 
-	wOut.Close()
-	wErr.Close()
+	_ = wOut.Close()
+	_ = wErr.Close()
 
 	var bufOut, bufErr bytes.Buffer
-	io.Copy(&bufOut, rOut)
-	io.Copy(&bufErr, rErr)
+	_, _ = io.Copy(&bufOut, rOut)
+	_, _ = io.Copy(&bufErr, rErr)
 
 	// Parse stdout JSON
 	var result output.Result
@@ -399,7 +399,7 @@ func TestDiffCommand_WithWebhook(t *testing.T) {
 	var receivedPayload output.Result
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		json.Unmarshal(body, &receivedPayload)
+		_ = json.Unmarshal(body, &receivedPayload)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -430,9 +430,9 @@ func TestDiffCommand_WithWebhook(t *testing.T) {
 		t.Fatalf("Command failed: %v", err)
 	}
 
-	w.Close()
+	_ = w.Close()
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 
 	// Parse stdout JSON
 	var result output.Result
