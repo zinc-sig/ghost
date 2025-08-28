@@ -19,14 +19,7 @@ var (
 	runFlags         CommonFlags
 	runContextConfig ContextConfig
 	runUploadConfig  UploadConfig
-
-	// Webhook configuration (not yet refactored)
-	webhookURL        string
-	webhookAuthType   string
-	webhookAuthToken  string
-	webhookTimeout    string
-	webhookRetries    int
-	webhookRetryDelay string
+	runWebhookConfig WebhookConfig
 )
 
 var runCmd = &cobra.Command{
@@ -167,14 +160,7 @@ func init() {
 	SetupCommonFlags(runCmd, &runFlags)
 	SetupContextFlags(runCmd, &runContextConfig)
 	SetupUploadFlags(runCmd, &runUploadConfig)
-
-	// Webhook flags (not yet refactored)
-	runCmd.Flags().StringVar(&webhookURL, "webhook-url", "", "Webhook URL to send results to")
-	runCmd.Flags().StringVar(&webhookAuthType, "webhook-auth-type", "none", "Authentication type: none, bearer, api-key")
-	runCmd.Flags().StringVar(&webhookAuthToken, "webhook-auth-token", "", "Authentication token (use with --webhook-auth-type)")
-	runCmd.Flags().IntVar(&webhookRetries, "webhook-retries", 3, "Maximum webhook retry attempts (0 = no retries)")
-	runCmd.Flags().StringVar(&webhookRetryDelay, "webhook-retry-delay", "1s", "Initial delay between webhook retries")
-	runCmd.Flags().StringVar(&webhookTimeout, "webhook-timeout", "30s", "Total timeout for webhook including retries")
+	SetupWebhookFlags(runCmd, &runWebhookConfig)
 
 	runCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
 		runFlags.ScoreSet = cmd.Flags().Changed("score")
@@ -187,7 +173,7 @@ func init() {
 		}
 
 		// Parse webhook configuration
-		if err := parseWebhookConfig(); err != nil {
+		if err := parseWebhookConfig(&runWebhookConfig); err != nil {
 			return err
 		}
 

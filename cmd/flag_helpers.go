@@ -47,3 +47,13 @@ func SetupTimeoutPreRun(timeoutStr string) (time.Duration, error) {
 	return timeout, nil
 }
 
+// SetupWebhookFlags adds webhook-related flags to a command
+func SetupWebhookFlags(cmd *cobra.Command, config *WebhookConfig) {
+	cmd.Flags().StringVar(&config.URL, "webhook-url", "", "Webhook URL to send results to")
+	cmd.Flags().StringVar(&config.AuthType, "webhook-auth-type", "none", "Authentication type: none, bearer, api-key")
+	cmd.Flags().StringVar(&config.AuthToken, "webhook-auth-token", "", "Authentication token (use with --webhook-auth-type)")
+	cmd.Flags().IntVar(&config.Retries, "webhook-retries", 3, "Maximum webhook retry attempts (0 = no retries)")
+	cmd.Flags().StringVar(&config.RetryDelay, "webhook-retry-delay", "1s", "Initial delay between webhook retries")
+	cmd.Flags().StringVar(&config.Timeout, "webhook-timeout", "30s", "Total timeout for webhook including retries")
+}
+

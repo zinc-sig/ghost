@@ -26,3 +26,13 @@ type CommonFlags struct {
 	ScoreSet   bool
 }
 
+// WebhookConfig holds webhook-related flags
+type WebhookConfig struct {
+	URL        string
+	AuthType   string
+	AuthToken  string
+	Timeout    string
+	Retries    int
+	RetryDelay string
+}
+

@@ -18,22 +18,26 @@ import (
 
 // resetWebhookGlobals resets all webhook-related global variables
 func resetWebhookGlobals() {
-	webhookURL = ""
-	webhookAuthType = "none"
-	webhookAuthToken = ""
-	webhookTimeout = "30s"
-	webhookRetries = 3
-	webhookRetryDelay = "1s"
-	webhookConfig = nil
-	webhookRetryConfig = nil
+	runWebhookConfig = WebhookConfig{
+		URL:        "",
+		AuthType:   "none",
+		AuthToken:  "",
+		Timeout:    "30s",
+		Retries:    3,
+		RetryDelay: "1s",
+	}
+	runWebhookConfigParsed = nil
+	runRetryConfig = nil
 
-	diffWebhookURL = ""
-	diffWebhookAuthType = "none"
-	diffWebhookAuthToken = ""
-	diffWebhookTimeout = "30s"
-	diffWebhookRetries = 3
-	diffWebhookRetryDelay = "1s"
-	diffWebhookConfig = nil
+	diffWebhookConfig = WebhookConfig{
+		URL:        "",
+		AuthType:   "none",
+		AuthToken:  "",
+		Timeout:    "30s",
+		Retries:    3,
+		RetryDelay: "1s",
+	}
+	diffWebhookConfigParsed = nil
 	diffRetryConfig = nil
 
 	// Reset timeout-related variables
