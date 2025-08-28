@@ -37,10 +37,10 @@ func resetWebhookGlobals() {
 	diffRetryConfig = nil
 
 	// Reset timeout-related variables
-	timeout = 0
-	timeoutStr = ""
-	diffTimeout = 0
-	diffTimeoutStr = ""
+	runFlags.Timeout = 0
+	runFlags.TimeoutStr = ""
+	diffCommonFlags.Timeout = 0
+	diffCommonFlags.TimeoutStr = ""
 }
 
 func TestRunCommand_WithWebhook(t *testing.T) {

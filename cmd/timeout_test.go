@@ -10,10 +10,10 @@ import (
 
 // resetTimeoutGlobals resets timeout-related globals for tests
 func resetTimeoutGlobals() {
-	timeoutStr = ""
-	timeout = 0
-	diffTimeoutStr = ""
-	diffTimeout = 0
+	runFlags.TimeoutStr = ""
+	runFlags.Timeout = 0
+	diffCommonFlags.TimeoutStr = ""
+	diffCommonFlags.Timeout = 0
 }
 
 func TestRunCommandTimeout(t *testing.T) {
