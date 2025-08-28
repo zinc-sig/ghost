@@ -94,6 +94,65 @@ ghost run -i /dev/null -o output.txt -e stderr.txt \
   -- echo "Hello World"
 ```
 
+### Webhook Support
+
+Ghost can send execution results to webhooks for integration with external systems:
+
+```bash
+# Basic webhook
+ghost run -i input.txt -o output.txt -e stderr.txt \
+  --webhook-url https://api.example.com/results \
+  -- ./my-command
+
+# With authentication (Bearer token)
+ghost run -i input.txt -o output.txt -e stderr.txt \
+  --webhook-url https://api.example.com/results \
+  --webhook-auth-type bearer \
+  --webhook-auth-token "your-token-here" \
+  -- ./my-command
+
+# With API key authentication
+ghost run -i input.txt -o output.txt -e stderr.txt \
+  --webhook-url https://api.example.com/results \
+  --webhook-auth-type api-key \
+  --webhook-auth-token "your-api-key" \
+  -- ./my-command
+
+# With retry configuration
+ghost run -i input.txt -o output.txt -e stderr.txt \
+  --webhook-url https://api.example.com/results \
+  --webhook-retries 5 \
+  --webhook-retry-delay 2s \
+  --webhook-timeout 60s \
+  -- ./my-command
+```
+
+Using environment variables for webhook configuration:
+
+```bash
+export GHOST_WEBHOOK_URL=https://api.example.com/results
+export GHOST_WEBHOOK_AUTH_TYPE=bearer
+export GHOST_WEBHOOK_AUTH_TOKEN=your-token-here
+export GHOST_WEBHOOK_RETRIES=3
+export GHOST_WEBHOOK_RETRY_DELAY=1s
+export GHOST_WEBHOOK_TIMEOUT=30s
+
+ghost run -i input.txt -o output.txt -e stderr.txt -- ./my-command
+```
+
+Webhook with upload and context:
+
+```bash
+ghost run -i /dev/null -o output.txt -e stderr.txt \
+  --upload-provider minio \
+  --upload-config-kv "endpoint=localhost:9000" \
+  --upload-config-kv "bucket=results" \
+  --webhook-url https://api.example.com/notify \
+  --context-kv "job_id=12345" \
+  --context-kv "user=alice" \
+  -- ./process-data
+```
+
 With timeout and verbose output:
 
 ```bash
@@ -156,6 +215,16 @@ ghost diff -i actual.txt -x expected.txt -o diff.txt -e stderr.txt \
   --score 100
 ```
 
+With webhook notification:
+
+```bash
+ghost diff -i actual.txt -x expected.txt -o diff.txt -e stderr.txt \
+  --webhook-url https://api.example.com/grading \
+  --webhook-auth-type bearer \
+  --webhook-auth-token "token-here" \
+  --score 100
+```
+
 ## JSON Output
 
 Ghost outputs execution results as JSON to stdout:
@@ -176,7 +245,9 @@ Ghost outputs execution results as JSON to stdout:
     "assignment": "hw1",
     "max_score": 100,
     "strict_mode": true
-  }
+  },
+  "webhook_sent": true,
+  "webhook_error": ""
 }
 ```
 
@@ -206,6 +277,8 @@ For diff commands, includes the expected field:
 - **timeout**: Timeout duration in milliseconds (optional)
 - **score**: Integer score value (optional, 0 if command fails)
 - **context**: Arbitrary JSON data for metadata (optional)
+- **webhook_sent**: Boolean indicating if webhook was sent successfully (optional, only when webhook is configured)
+- **webhook_error**: Error message if webhook failed (optional, empty string on success)
 
 **Note**: The `-i`, `-o`, and `-e` flags are mandatory for all command executions.
 
@@ -221,6 +294,9 @@ For diff commands, includes the expected field:
 - **Score Tracking**: Optional scoring with conditional logic
 - **Context Metadata**: Attach arbitrary JSON data to command executions via multiple input methods
 - **Type Inference**: Automatic detection of numbers and booleans in key-value pairs
+- **Upload Support**: Upload output files to MinIO/S3-compatible storage providers
+- **Webhook Integration**: Send results to webhooks with authentication and retry support
+- **Environment Configuration**: Configure upload and webhook settings via environment variables
 - **Diff Flags**: Pass custom flags to diff for flexible comparison (e.g., ignore whitespace)
 - **Structured Output**: JSON format for easy parsing and automation
 - **Exit Code Capture**: Reliable exit code reporting
