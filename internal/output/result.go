@@ -12,4 +12,8 @@ type Result struct {
 	Timeout       *int64  `json:"timeout,omitempty"` // in milliseconds
 	Score         *int    `json:"score,omitempty"`
 	Context       any     `json:"context,omitempty"`
+
+	// Webhook status (only in local output, not sent to webhook)
+	WebhookSent  bool   `json:"webhook_sent,omitempty"`
+	WebhookError string `json:"webhook_error,omitempty"`
 }
