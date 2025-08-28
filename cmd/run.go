@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 	contextparser "github.com/zinc-sig/ghost/internal/context"
@@ -36,24 +35,19 @@ The '--' separator is required to distinguish ghost flags from the target comman
 }
 
 func runCommand(cmd *cobra.Command, args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("no command specified after '--'")
+	// Validate command separator
+	if err := ValidateCommandSeparator(cmd, args); err != nil {
+		return err
 	}
 
-	dashIndex := cmd.ArgsLenAtDash()
-	if dashIndex == -1 {
-		return fmt.Errorf("command separator '--' is required")
+	// Validate required I/O flags
+	ioFlags := IOFlags{
+		Input:  inputFile,
+		Output: outputFile,
+		Stderr: stderrFile,
 	}
-
-	// Validate required flags
-	if inputFile == "" {
-		return fmt.Errorf("required flag 'input' not set")
-	}
-	if outputFile == "" {
-		return fmt.Errorf("required flag 'output' not set")
-	}
-	if stderrFile == "" {
-		return fmt.Errorf("required flag 'stderr' not set")
+	if err := ValidateIOFlags(ioFlags, false); err != nil {
+		return err
 	}
 
 	targetCommand := args[0]
@@ -76,21 +70,13 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 	if provider != nil {
 		// Create temp files for execution when upload is configured
-		tempOut, err := os.CreateTemp("", "ghost-output-*.txt")
+		tempOut, tempErr, cleanup, err := CreateTempFiles("run")
 		if err != nil {
-			return fmt.Errorf("failed to create temp output file: %w", err)
+			return err
 		}
-		defer func() { _ = os.Remove(tempOut.Name()) }()
-		actualOutputFile = tempOut.Name()
-		_ = tempOut.Close()
-
-		tempErr, err := os.CreateTemp("", "ghost-stderr-*.txt")
-		if err != nil {
-			return fmt.Errorf("failed to create temp stderr file: %w", err)
-		}
-		defer func() { _ = os.Remove(tempErr.Name()) }()
-		actualStderrFile = tempErr.Name()
-		_ = tempErr.Close()
+		defer cleanup()
+		actualOutputFile = tempOut
+		actualStderrFile = tempErr
 	}
 
 	config := &runner.Config{
@@ -134,6 +120,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		config.InputFile,
 		config.OutputFile,
 		config.StderrFile,
+		"", // No expected file for run command
 		result,
 		timeoutMs,
 		runFlags.ScoreSet,

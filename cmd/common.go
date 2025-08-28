@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/zinc-sig/ghost/internal/output"
 	"github.com/zinc-sig/ghost/internal/runner"
@@ -13,7 +12,8 @@ import (
 )
 
 // createJSONResult creates a JSON result from execution results
-func createJSONResult(inputPath, outputPath, stderrPath string, result *runner.Result, timeoutMs int64, scoreSet bool, score int, context any) *output.Result {
+// The expectedPath parameter is optional - pass empty string for run command
+func createJSONResult(inputPath, outputPath, stderrPath, expectedPath string, result *runner.Result, timeoutMs int64, scoreSet bool, score int, context any) *output.Result {
 	jsonResult := &output.Result{
 		Command:       result.Command,
 		Status:        string(result.Status),
@@ -23,6 +23,11 @@ func createJSONResult(inputPath, outputPath, stderrPath string, result *runner.R
 		ExitCode:      result.ExitCode,
 		ExecutionTime: result.ExecutionTime,
 		Context:       context,
+	}
+
+	// Add expected field only if provided (for diff command)
+	if expectedPath != "" {
+		jsonResult.Expected = &expectedPath
 	}
 
 	// Add timeout if it was set
@@ -42,35 +47,9 @@ func createJSONResult(inputPath, outputPath, stderrPath string, result *runner.R
 	return jsonResult
 }
 
-// createDiffJSONResult creates a JSON result for diff command with expected field
+// createDiffJSONResult is now deprecated - use createJSONResult with expectedPath parameter
 func createDiffJSONResult(inputPath, expectedPath, outputPath, stderrPath string, result *runner.Result, timeoutMs int64, scoreSet bool, score int, context any) *output.Result {
-	jsonResult := &output.Result{
-		Command:       result.Command,
-		Status:        string(result.Status),
-		Input:         inputPath,
-		Expected:      &expectedPath,
-		Output:        outputPath,
-		Stderr:        stderrPath,
-		ExitCode:      result.ExitCode,
-		ExecutionTime: result.ExecutionTime,
-		Context:       context,
-	}
-
-	// Add timeout if it was set
-	if timeoutMs > 0 {
-		jsonResult.Timeout = &timeoutMs
-	}
-
-	if scoreSet {
-		if result.ExitCode == 0 {
-			jsonResult.Score = &score
-		} else {
-			zero := 0
-			jsonResult.Score = &zero
-		}
-	}
-
-	return jsonResult
+	return createJSONResult(inputPath, outputPath, stderrPath, expectedPath, result, timeoutMs, scoreSet, score, context)
 }
 
 // outputJSON marshals and prints the result as JSON
@@ -94,98 +73,28 @@ var (
 
 // parseWebhookConfig parses webhook configuration for run command
 func parseWebhookConfig(config *WebhookConfig) error {
-	if config.URL == "" {
-		return nil // No webhook configured
+	// Merge environment variables
+	if err := MergeWebhookConfigFromEnv(config); err != nil {
+		return err
 	}
 
-	// Parse webhook timeout
-	var webhookTimeoutDur time.Duration
-	if config.Timeout != "" {
-		var err error
-		webhookTimeoutDur, err = time.ParseDuration(config.Timeout)
-		if err != nil {
-			return fmt.Errorf("invalid webhook timeout duration: %w", err)
-		}
-	} else {
-		webhookTimeoutDur = 30 * time.Second
-	}
-
-	// Parse retry delay
-	var retryDelay time.Duration
-	if config.RetryDelay != "" {
-		var err error
-		retryDelay, err = time.ParseDuration(config.RetryDelay)
-		if err != nil {
-			return fmt.Errorf("invalid webhook retry delay: %w", err)
-		}
-	} else {
-		retryDelay = 1 * time.Second
-	}
-
-	runWebhookConfigParsed = &webhook.Config{
-		URL:       config.URL,
-		Method:    "POST",
-		Timeout:   webhookTimeoutDur,
-		AuthType:  config.AuthType,
-		AuthToken: config.AuthToken,
-	}
-
-	runRetryConfig = &webhook.RetryConfig{
-		MaxRetries:   config.Retries,
-		InitialDelay: retryDelay,
-		MaxDelay:     30 * time.Second,
-		Multiplier:   2.0,
-	}
-
-	return nil
+	// Parse to internal structures
+	var err error
+	runWebhookConfigParsed, runRetryConfig, err = ParseWebhookConfigToInternal(config)
+	return err
 }
 
 // parseDiffWebhookConfig parses webhook configuration for diff command
 func parseDiffWebhookConfig(config *WebhookConfig) error {
-	if config.URL == "" {
-		return nil // No webhook configured
+	// Merge environment variables
+	if err := MergeWebhookConfigFromEnv(config); err != nil {
+		return err
 	}
 
-	// Parse webhook timeout
-	var webhookTimeoutDur time.Duration
-	if config.Timeout != "" {
-		var err error
-		webhookTimeoutDur, err = time.ParseDuration(config.Timeout)
-		if err != nil {
-			return fmt.Errorf("invalid webhook timeout duration: %w", err)
-		}
-	} else {
-		webhookTimeoutDur = 30 * time.Second
-	}
-
-	// Parse retry delay
-	var retryDelay time.Duration
-	if config.RetryDelay != "" {
-		var err error
-		retryDelay, err = time.ParseDuration(config.RetryDelay)
-		if err != nil {
-			return fmt.Errorf("invalid webhook retry delay: %w", err)
-		}
-	} else {
-		retryDelay = 1 * time.Second
-	}
-
-	diffWebhookConfigParsed = &webhook.Config{
-		URL:       config.URL,
-		Method:    "POST",
-		Timeout:   webhookTimeoutDur,
-		AuthType:  config.AuthType,
-		AuthToken: config.AuthToken,
-	}
-
-	diffRetryConfig = &webhook.RetryConfig{
-		MaxRetries:   config.Retries,
-		InitialDelay: retryDelay,
-		MaxDelay:     30 * time.Second,
-		Multiplier:   2.0,
-	}
-
-	return nil
+	// Parse to internal structures
+	var err error
+	diffWebhookConfigParsed, diffRetryConfig, err = ParseWebhookConfigToInternal(config)
+	return err
 }
 
 // outputJSONAndWebhook outputs JSON to stdout and optionally sends to webhook

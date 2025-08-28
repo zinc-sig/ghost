@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -48,18 +47,15 @@ Common flags for grading include:
 }
 
 func diffCommand(cmd *cobra.Command, args []string) error {
-	// Validate required flags
-	if diffInputFile == "" {
-		return fmt.Errorf("required flag 'input' not set")
+	// Validate required I/O flags
+	ioFlags := IOFlags{
+		Input:    diffInputFile,
+		Output:   diffOutputFile,
+		Stderr:   diffStderrFile,
+		Expected: diffExpectedFile,
 	}
-	if diffExpectedFile == "" {
-		return fmt.Errorf("required flag 'expected' not set")
-	}
-	if diffOutputFile == "" {
-		return fmt.Errorf("required flag 'output' not set")
-	}
-	if diffStderrFile == "" {
-		return fmt.Errorf("required flag 'stderr' not set")
+	if err := ValidateIOFlags(ioFlags, true); err != nil {
+		return err
 	}
 
 	// Setup upload provider if configured
@@ -79,21 +75,13 @@ func diffCommand(cmd *cobra.Command, args []string) error {
 
 	if provider != nil {
 		// Create temp files for execution when upload is configured
-		tempOut, err := os.CreateTemp("", "ghost-diff-output-*.txt")
+		tempOut, tempErr, cleanup, err := CreateTempFiles("diff")
 		if err != nil {
-			return fmt.Errorf("failed to create temp output file: %w", err)
+			return err
 		}
-		defer func() { _ = os.Remove(tempOut.Name()) }()
-		actualOutputFile = tempOut.Name()
-		_ = tempOut.Close()
-
-		tempErr, err := os.CreateTemp("", "ghost-diff-stderr-*.txt")
-		if err != nil {
-			return fmt.Errorf("failed to create temp stderr file: %w", err)
-		}
-		defer func() { _ = os.Remove(tempErr.Name()) }()
-		actualStderrFile = tempErr.Name()
-		_ = tempErr.Close()
+		defer cleanup()
+		actualOutputFile = tempOut
+		actualStderrFile = tempErr
 	}
 
 	// Build args for diff command

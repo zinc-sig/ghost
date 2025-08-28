@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -29,22 +28,10 @@ func SetupCommonFlags(cmd *cobra.Command, flags *CommonFlags) {
 	cmd.Flags().IntVar(&flags.Score, "score", 0, "Optional score integer (included in output if exit code is 0)")
 }
 
-// SetupTimeoutPreRun parses and validates the timeout duration
+// SetupTimeoutPreRun is now deprecated - use ParseTimeout from command_helpers.go
+// Keeping for backward compatibility
 func SetupTimeoutPreRun(timeoutStr string) (time.Duration, error) {
-	if timeoutStr == "" {
-		return 0, nil
-	}
-
-	timeout, err := time.ParseDuration(timeoutStr)
-	if err != nil {
-		return 0, fmt.Errorf("invalid timeout duration: %w", err)
-	}
-
-	if timeout <= 0 {
-		return 0, fmt.Errorf("timeout must be positive")
-	}
-
-	return timeout, nil
+	return ParseTimeout(timeoutStr)
 }
 
 // SetupWebhookFlags adds webhook-related flags to a command
