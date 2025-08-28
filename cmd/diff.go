@@ -2,8 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 	contextparser "github.com/zinc-sig/ghost/internal/context"
@@ -11,21 +11,19 @@ import (
 )
 
 var (
+	// Command-specific I/O flags
 	diffInputFile    string
 	diffExpectedFile string
 	diffOutputFile   string
 	diffStderrFile   string
-	diffVerbose      bool
-	diffTimeoutStr   string
-	diffTimeout      time.Duration
 	diffFlags        string
-	diffScore        int
-	diffScoreSet     bool
-	diffContextJSON  string
-	diffContextKV    []string
-	diffContextFile  string
 
-	// Webhook configuration for diff
+	// Common flag structures
+	diffCommonFlags   CommonFlags
+	diffContextConfig ContextConfig
+	diffUploadConfig  UploadConfig
+
+	// Webhook configuration for diff (not yet refactored)
 	diffWebhookURL        string
 	diffWebhookAuthType   string
 	diffWebhookAuthToken  string
@@ -71,6 +69,40 @@ func diffCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("required flag 'stderr' not set")
 	}
 
+	// Setup upload provider if configured
+	provider, uploadConf, err := SetupUploadProvider(&diffUploadConfig)
+	if err != nil {
+		return err
+	}
+
+	// Print upload info in verbose mode
+	if provider != nil && diffCommonFlags.Verbose {
+		PrintUploadInfo(provider, uploadConf, diffOutputFile, diffStderrFile)
+	}
+
+	// Determine actual execution paths
+	actualOutputFile := diffOutputFile
+	actualStderrFile := diffStderrFile
+
+	if provider != nil {
+		// Create temp files for execution when upload is configured
+		tempOut, err := os.CreateTemp("", "ghost-diff-output-*.txt")
+		if err != nil {
+			return fmt.Errorf("failed to create temp output file: %w", err)
+		}
+		defer os.Remove(tempOut.Name())
+		actualOutputFile = tempOut.Name()
+		tempOut.Close()
+
+		tempErr, err := os.CreateTemp("", "ghost-diff-stderr-*.txt")
+		if err != nil {
+			return fmt.Errorf("failed to create temp stderr file: %w", err)
+		}
+		defer os.Remove(tempErr.Name())
+		actualStderrFile = tempErr.Name()
+		tempErr.Close()
+	}
+
 	// Build args for diff command
 	var diffArgs []string
 
@@ -89,10 +121,10 @@ func diffCommand(cmd *cobra.Command, args []string) error {
 		Command:    "diff",
 		Args:       diffArgs,
 		InputFile:  "/dev/null", // diff doesn't need stdin
-		OutputFile: diffOutputFile,
-		StderrFile: diffStderrFile,
-		Verbose:    diffVerbose,
-		Timeout:    diffTimeout,
+		OutputFile: actualOutputFile,
+		StderrFile: actualStderrFile,
+		Verbose:    diffCommonFlags.Verbose,
+		Timeout:    diffCommonFlags.Timeout,
 	}
 
 	// Execute diff command
@@ -101,16 +133,27 @@ func diffCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to execute diff: %w", err)
 	}
 
+	// Upload files if provider is configured
+	if provider != nil {
+		files := map[string]string{
+			actualOutputFile: diffOutputFile,
+			actualStderrFile: diffStderrFile,
+		}
+		if err := HandleUploads(provider, files, diffCommonFlags.Verbose); err != nil {
+			return err
+		}
+	}
+
 	// Build context from all sources
-	ctx, err := contextparser.BuildContext(diffContextJSON, diffContextKV, diffContextFile)
+	ctx, err := contextparser.BuildContext(diffContextConfig.JSON, diffContextConfig.KV, diffContextConfig.File)
 	if err != nil {
 		return fmt.Errorf("failed to build context: %w", err)
 	}
 
 	// Create JSON result for diff command
 	var timeoutMs int64
-	if diffTimeout > 0 {
-		timeoutMs = diffTimeout.Milliseconds()
+	if diffCommonFlags.Timeout > 0 {
+		timeoutMs = diffCommonFlags.Timeout.Milliseconds()
 	}
 	jsonResult := createDiffJSONResult(
 		diffInputFile,
@@ -119,23 +162,22 @@ func diffCommand(cmd *cobra.Command, args []string) error {
 		diffStderrFile,
 		result,
 		timeoutMs,
-		diffScoreSet,
-		diffScore,
+		diffCommonFlags.ScoreSet,
+		diffCommonFlags.Score,
 		ctx,
 	)
 
 	// Output JSON and send webhook
-	return outputJSONAndWebhook(jsonResult, diffVerbose)
+	return outputJSONAndWebhook(jsonResult, diffCommonFlags.Verbose)
 }
 
 func init() {
+	// Command-specific flags
 	diffCmd.Flags().StringVarP(&diffInputFile, "input", "i", "", "Input file to compare (required)")
 	diffCmd.Flags().StringVarP(&diffExpectedFile, "expected", "x", "", "Expected file to compare against (required)")
 	diffCmd.Flags().StringVarP(&diffOutputFile, "output", "o", "", "Output file for diff results (required)")
 	diffCmd.Flags().StringVarP(&diffStderrFile, "stderr", "e", "", "Error file to capture diff's stderr (required)")
-	diffCmd.Flags().BoolVarP(&diffVerbose, "verbose", "v", false, "Show diff stderr on terminal in addition to file")
 	diffCmd.Flags().StringVar(&diffFlags, "diff-flags", "", "Flags to pass to the diff command (e.g., \"--ignore-trailing-space -B\")")
-	diffCmd.Flags().StringVarP(&diffTimeoutStr, "timeout", "t", "", "Timeout duration (e.g., 30s, 2m, 500ms)")
 
 	// Mark flags as required
 	_ = diffCmd.MarkFlagRequired("input")
@@ -143,12 +185,10 @@ func init() {
 	_ = diffCmd.MarkFlagRequired("output")
 	_ = diffCmd.MarkFlagRequired("stderr")
 
-	diffCmd.Flags().IntVar(&diffScore, "score", 0, "Optional score integer (included in output if files match)")
-
-	// Context flags
-	diffCmd.Flags().StringVar(&diffContextJSON, "context", "", "Context data as JSON string")
-	diffCmd.Flags().StringArrayVar(&diffContextKV, "context-kv", nil, "Context key=value pairs (can be used multiple times)")
-	diffCmd.Flags().StringVar(&diffContextFile, "context-file", "", "Path to JSON file containing context data")
+	// Setup common flags using helpers
+	SetupCommonFlags(diffCmd, &diffCommonFlags)
+	SetupContextFlags(diffCmd, &diffContextConfig)
+	SetupUploadFlags(diffCmd, &diffUploadConfig)
 
 	// Webhook flags for diff
 	diffCmd.Flags().StringVar(&diffWebhookURL, "webhook-url", "", "Webhook URL to send results to")
@@ -159,18 +199,13 @@ func init() {
 	diffCmd.Flags().StringVar(&diffWebhookTimeout, "webhook-timeout", "30s", "Total timeout for webhook including retries")
 
 	diffCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
-		diffScoreSet = cmd.Flags().Changed("score")
+		diffCommonFlags.ScoreSet = cmd.Flags().Changed("score")
 
 		// Parse timeout if provided
-		if diffTimeoutStr != "" {
-			var err error
-			diffTimeout, err = time.ParseDuration(diffTimeoutStr)
-			if err != nil {
-				return fmt.Errorf("invalid timeout duration: %w", err)
-			}
-			if diffTimeout <= 0 {
-				return fmt.Errorf("timeout must be positive")
-			}
+		var err error
+		diffCommonFlags.Timeout, err = SetupTimeoutPreRun(diffCommonFlags.TimeoutStr)
+		if err != nil {
+			return err
 		}
 
 		// Parse webhook configuration for diff
@@ -181,3 +216,4 @@ func init() {
 		return nil
 	}
 }
+
