@@ -11,4 +11,5 @@ type Result struct {
 	ExecutionTime int64   `json:"execution_time"`
 	Timeout       *int64  `json:"timeout,omitempty"` // in milliseconds
 	Score         *int    `json:"score,omitempty"`
+	Context       any     `json:"context,omitempty"`
 }
