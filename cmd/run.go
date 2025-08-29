@@ -61,9 +61,18 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Parse additional upload files if specified
+	var additionalFiles map[string]string
+	if len(runUploadConfig.UploadFiles) > 0 {
+		additionalFiles, err = helpers.ParseUploadFiles(runUploadConfig.UploadFiles)
+		if err != nil {
+			return fmt.Errorf("failed to parse upload files: %w", err)
+		}
+	}
+
 	// Print upload info in verbose or dry run mode
 	if provider != nil && (runFlags.Verbose || runFlags.DryRun) {
-		helpers.PrintUploadInfo(provider, uploadConf, outputFile, stderrFile, runFlags.DryRun)
+		helpers.PrintUploadInfo(provider, uploadConf, outputFile, stderrFile, additionalFiles, runFlags.DryRun)
 	}
 
 	// Determine actual execution paths
@@ -99,11 +108,18 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 	// Upload files if provider is configured
 	if provider != nil {
+		// Validate additional files exist after command execution
+		if additionalFiles != nil && !runFlags.DryRun {
+			if err := helpers.ValidateUploadFiles(additionalFiles); err != nil {
+				return err
+			}
+		}
+
 		files := map[string]string{
 			actualOutputFile: outputFile,
 			actualStderrFile: stderrFile,
 		}
-		if err := helpers.HandleUploads(provider, files, runFlags.Verbose, runFlags.DryRun); err != nil {
+		if err := helpers.HandleUploads(provider, files, additionalFiles, runFlags.Verbose, runFlags.DryRun); err != nil {
 			return err
 		}
 	}

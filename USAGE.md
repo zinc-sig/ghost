@@ -217,9 +217,10 @@ ghost run -i test-suite.txt -o test-results.xml -e test-errors.log \
 for submission in submissions/*.c; do
   student_id=$(basename "$submission" .c)
   
-  # Compile
+  # Compile and upload the binary
   ghost run -i /dev/null -o "results/${student_id}_compile.log" \
     -e "results/${student_id}_compile_errors.log" \
+    --upload-files "/tmp/${student_id}:binaries/${student_id}" \
     --context-kv "student_id=${student_id}" \
     --context-kv "phase=compilation" \
     --timeout 10s \
@@ -251,8 +252,13 @@ done
 #!/bin/bash
 # ci-pipeline.sh
 
-# Build stage
+# Build stage with artifact upload
 ghost run -i /dev/null -o build.log -e build-errors.log \
+  --upload-provider minio \
+  --upload-config-kv "bucket=ci-artifacts" \
+  --upload-config-kv "prefix=builds/${BUILD_ID}/" \
+  --upload-files "app.exe:binaries/app.exe" \
+  --upload-files "app.pdb:debug/app.pdb" \
   --context-kv "stage=build" \
   --context-kv "commit=${GIT_COMMIT}" \
   --context-kv "branch=${GIT_BRANCH}" \
@@ -284,6 +290,30 @@ if [ $? -eq 0 ]; then
     --webhook-auth-token "${DEPLOY_TOKEN}" \
     -- ./deploy.sh
 fi
+```
+
+### Data Processing with Additional Files Upload
+
+```bash
+# Process data and upload generated reports/artifacts
+ghost run -i raw_data.csv -o processing.log -e errors.log \
+  --upload-provider minio \
+  --upload-config-kv "bucket=data-lake" \
+  --upload-config-kv "prefix=processed/$(date +%Y%m%d)/" \
+  --upload-files "summary_report.pdf" \
+  --upload-files "cleaned_data.csv:data/cleaned.csv" \
+  --upload-files "visualization.png:images/viz.png" \
+  --upload-files "statistics.json:meta/stats.json" \
+  -- python process_data.py raw_data.csv
+
+# Compile and upload binary with debug symbols
+ghost run -i /dev/null -o compile.log -e compile_errors.log \
+  --upload-provider minio \
+  --upload-config-kv "bucket=builds" \
+  --upload-files "program:bin/program" \
+  --upload-files "program.map:debug/program.map" \
+  --upload-files "program.pdb:debug/program.pdb" \
+  -- gcc -g -o program main.c -Wl,-Map=program.map
 ```
 
 ### Performance Benchmarking

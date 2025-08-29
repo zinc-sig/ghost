@@ -66,9 +66,18 @@ func diffCommand(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Parse additional upload files if specified
+	var additionalFiles map[string]string
+	if len(diffUploadConfig.UploadFiles) > 0 {
+		additionalFiles, err = helpers.ParseUploadFiles(diffUploadConfig.UploadFiles)
+		if err != nil {
+			return fmt.Errorf("failed to parse upload files: %w", err)
+		}
+	}
+
 	// Print upload info in verbose or dry run mode
 	if provider != nil && (diffCommonFlags.Verbose || diffCommonFlags.DryRun) {
-		helpers.PrintUploadInfo(provider, uploadConf, diffOutputFile, diffStderrFile, diffCommonFlags.DryRun)
+		helpers.PrintUploadInfo(provider, uploadConf, diffOutputFile, diffStderrFile, additionalFiles, diffCommonFlags.DryRun)
 	}
 
 	// Determine actual execution paths
@@ -119,11 +128,18 @@ func diffCommand(cmd *cobra.Command, args []string) error {
 
 	// Upload files if provider is configured
 	if provider != nil {
+		// Validate additional files exist after command execution
+		if additionalFiles != nil && !diffCommonFlags.DryRun {
+			if err := helpers.ValidateUploadFiles(additionalFiles); err != nil {
+				return err
+			}
+		}
+
 		files := map[string]string{
 			actualOutputFile: diffOutputFile,
 			actualStderrFile: diffStderrFile,
 		}
-		if err := helpers.HandleUploads(provider, files, diffCommonFlags.Verbose, diffCommonFlags.DryRun); err != nil {
+		if err := helpers.HandleUploads(provider, files, additionalFiles, diffCommonFlags.Verbose, diffCommonFlags.DryRun); err != nil {
 			return err
 		}
 	}
