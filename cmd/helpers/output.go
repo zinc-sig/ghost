@@ -48,7 +48,6 @@ func CreateJSONResult(inputPath, outputPath, stderrPath, expectedPath string, re
 	return jsonResult
 }
 
-
 // outputJSON marshals and prints the result as JSON
 func OutputJSON(result *output.Result) error {
 	jsonOutput, err := json.Marshal(result)
@@ -95,7 +94,6 @@ func ParseWebhookConfig(config *config.WebhookConfig, isRunCommand bool) error {
 
 	return nil
 }
-
 
 // outputJSONAndWebhook outputs JSON to stdout and optionally sends to webhook
 func OutputJSONAndWebhook(result *output.Result, verbose bool) error {

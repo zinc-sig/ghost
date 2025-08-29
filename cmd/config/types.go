@@ -30,13 +30,13 @@ type CommonFlags struct {
 type WebhookConfig struct {
 	// Direct configuration flags
 	URL        string
-	Method     string   // HTTP method (GET, POST, PUT, PATCH, DELETE)
+	Method     string // HTTP method (GET, POST, PUT, PATCH, DELETE)
 	AuthType   string
 	AuthToken  string
 	Timeout    string
 	Retries    int
 	RetryDelay string
-	
+
 	// Alternative configuration methods
 	Config     string   // JSON string configuration
 	ConfigKV   []string // Key-value pairs

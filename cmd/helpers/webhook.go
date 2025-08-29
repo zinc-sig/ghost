@@ -11,12 +11,12 @@ import (
 
 // Default webhook configuration constants
 const (
-	DefaultWebhookTimeout     = "30s"
-	DefaultWebhookRetryDelay  = "1s"
-	DefaultWebhookRetries     = 3
-	DefaultWebhookMethod      = "POST"
-	DefaultWebhookAuthType    = "none"
-	WebhookRetryMultiplier    = 2.0
+	DefaultWebhookTimeout    = "30s"
+	DefaultWebhookRetryDelay = "1s"
+	DefaultWebhookRetries    = 3
+	DefaultWebhookMethod     = "POST"
+	DefaultWebhookAuthType   = "none"
+	WebhookRetryMultiplier   = 2.0
 )
 
 // WebhookMaxRetryDelay is the maximum delay between retry attempts in exponential backoff
@@ -79,7 +79,7 @@ func ParseWebhookConfigToInternal(cfg *config.WebhookConfig) (*webhook.Config, *
 	if err != nil {
 		return nil, nil, err
 	}
-	
+
 	// Check if webhook is configured
 	url, _ := configMap["url"].(string)
 	if url == "" {
@@ -88,7 +88,7 @@ func ParseWebhookConfigToInternal(cfg *config.WebhookConfig) (*webhook.Config, *
 
 	// Parse webhook timeout
 	defaultTimeout, _ := time.ParseDuration(DefaultWebhookTimeout)
-	var webhookTimeoutDur time.Duration = defaultTimeout
+	var webhookTimeoutDur = defaultTimeout
 	if timeout, ok := configMap["timeout"].(string); ok && timeout != "" {
 		webhookTimeoutDur, err = time.ParseDuration(timeout)
 		if err != nil {
@@ -98,27 +98,27 @@ func ParseWebhookConfigToInternal(cfg *config.WebhookConfig) (*webhook.Config, *
 
 	// Parse retry delay
 	defaultRetryDelay, _ := time.ParseDuration(DefaultWebhookRetryDelay)
-	var retryDelay time.Duration = defaultRetryDelay
+	var retryDelay = defaultRetryDelay
 	if delay, ok := configMap["retry_delay"].(string); ok && delay != "" {
 		retryDelay, err = time.ParseDuration(delay)
 		if err != nil {
 			return nil, nil, fmt.Errorf("invalid webhook retry delay: %w", err)
 		}
 	}
-	
+
 	// Get HTTP method (default to POST)
 	method, _ := configMap["method"].(string)
 	if method == "" {
 		method = DefaultWebhookMethod
 	}
-	
+
 	// Get auth settings
 	authType, _ := configMap["auth_type"].(string)
 	if authType == "" {
 		authType = DefaultWebhookAuthType
 	}
 	authToken, _ := configMap["auth_token"].(string)
-	
+
 	// Get retries (handle both int and float64 from JSON)
 	maxRetries := DefaultWebhookRetries
 	if r, ok := configMap["retries"].(int); ok {
@@ -144,4 +144,3 @@ func ParseWebhookConfigToInternal(cfg *config.WebhookConfig) (*webhook.Config, *
 
 	return webhookConfig, retryConfig, nil
 }
-

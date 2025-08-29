@@ -27,7 +27,6 @@ func SetupCommonFlags(cmd *cobra.Command, flags *config.CommonFlags) {
 	cmd.Flags().IntVar(&flags.Score, "score", 0, "Optional score integer (included in output if exit code is 0)")
 }
 
-
 // SetupWebhookFlags adds webhook-related flags to a command
 func SetupWebhookFlags(cmd *cobra.Command, cfg *config.WebhookConfig) {
 	// Direct configuration flags
@@ -38,7 +37,7 @@ func SetupWebhookFlags(cmd *cobra.Command, cfg *config.WebhookConfig) {
 	cmd.Flags().IntVar(&cfg.Retries, "webhook-retries", DefaultWebhookRetries, "Maximum webhook retry attempts (0 = no retries)")
 	cmd.Flags().StringVar(&cfg.RetryDelay, "webhook-retry-delay", DefaultWebhookRetryDelay, "Initial delay between webhook retries")
 	cmd.Flags().StringVar(&cfg.Timeout, "webhook-timeout", DefaultWebhookTimeout, "Total timeout for webhook including retries")
-	
+
 	// Alternative configuration methods
 	cmd.Flags().StringVar(&cfg.Config, "webhook-config", "", "Webhook configuration as JSON string")
 	cmd.Flags().StringArrayVar(&cfg.ConfigKV, "webhook-config-kv", nil, "Webhook config key=value pairs (can be used multiple times)")

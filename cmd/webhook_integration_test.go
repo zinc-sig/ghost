@@ -37,7 +37,7 @@ func resetWebhookGlobals() {
 		Retries:    3,
 		RetryDelay: "1s",
 	}
-	
+
 	// Reset the global webhook configs in helpers package
 	helpers.ResetWebhookConfigs()
 
