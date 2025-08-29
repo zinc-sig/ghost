@@ -37,7 +37,7 @@ func BuildUploadConfig(cfg *config.UploadConfig) (map[string]any, error) {
 // parseUploadEnv and toLowerSnakeCase are no longer needed - using ParseEnvWithPrefix
 
 // SetupUploadProvider creates and configures an upload provider
-func SetupUploadProvider(cfg *config.UploadConfig) (upload.Provider, map[string]any, error) {
+func SetupUploadProvider(cfg *config.UploadConfig, dryRun bool) (upload.Provider, map[string]any, error) {
 	if cfg.Provider == "" {
 		return nil, nil, nil
 	}
@@ -52,16 +52,27 @@ func SetupUploadProvider(cfg *config.UploadConfig) (upload.Provider, map[string]
 		return nil, nil, fmt.Errorf("failed to create upload provider: %w", err)
 	}
 
-	if err := provider.Configure(uploadConf); err != nil {
-		return nil, nil, fmt.Errorf("failed to configure upload provider: %w", err)
+	// Skip actual configuration/validation in dry run mode
+	if !dryRun {
+		if err := provider.Configure(uploadConf); err != nil {
+			return nil, nil, fmt.Errorf("failed to configure upload provider: %w", err)
+		}
 	}
 
 	return provider, uploadConf, nil
 }
 
 // HandleUploads uploads files using the provider
-func HandleUploads(provider upload.Provider, files map[string]string, verbose bool) error {
+func HandleUploads(provider upload.Provider, files map[string]string, verbose bool, dryRun bool) error {
 	if provider == nil {
+		return nil
+	}
+
+	if dryRun {
+		fmt.Fprintln(os.Stderr, "[DRY RUN] Would upload the following files:")
+		for localPath, remotePath := range files {
+			fmt.Fprintf(os.Stderr, "  %s → %s\n", localPath, remotePath)
+		}
 		return nil
 	}
 
@@ -85,9 +96,13 @@ func HandleUploads(provider upload.Provider, files map[string]string, verbose bo
 }
 
 // PrintUploadInfo prints upload configuration in verbose mode
-func PrintUploadInfo(provider upload.Provider, config map[string]any, outputPath, stderrPath string) {
+func PrintUploadInfo(provider upload.Provider, config map[string]any, outputPath, stderrPath string, dryRun bool) {
+	header := "Upload Configuration"
+	if dryRun {
+		header = "Upload Configuration (DRY RUN)"
+	}
 	fmt.Fprintln(os.Stderr, "========================================")
-	fmt.Fprintln(os.Stderr, "Upload Configuration")
+	fmt.Fprintln(os.Stderr, header)
 	fmt.Fprintln(os.Stderr, "========================================")
 	fmt.Fprintf(os.Stderr, "Provider:       %s\n", provider.Name())
 
@@ -101,6 +116,13 @@ func PrintUploadInfo(provider upload.Provider, config map[string]any, outputPath
 		}
 		if prefix, ok := config["prefix"]; ok && prefix != "" {
 			fmt.Fprintf(os.Stderr, "Prefix:         %v\n", prefix)
+		}
+		// Redact sensitive fields
+		if _, ok := config["access_key"]; ok {
+			fmt.Fprintf(os.Stderr, "Access Key:     ***REDACTED***\n")
+		}
+		if _, ok := config["secret_key"]; ok {
+			fmt.Fprintf(os.Stderr, "Secret Key:     ***REDACTED***\n")
 		}
 	}
 
