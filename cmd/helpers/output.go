@@ -78,12 +78,7 @@ func ResetWebhookConfigs() {
 
 // ParseWebhookConfig parses webhook configuration for the specified command
 func ParseWebhookConfig(config *config.WebhookConfig, isRunCommand bool) error {
-	// Merge environment variables
-	if err := MergeWebhookConfigFromEnv(config); err != nil {
-		return err
-	}
-
-	// Parse to internal structures
+	// Parse to internal structures (BuildWebhookConfig is called inside)
 	webhookConfig, retryConfig, err := ParseWebhookConfigToInternal(config)
 	if err != nil {
 		return err
