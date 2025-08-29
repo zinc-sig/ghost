@@ -9,8 +9,8 @@ Complete reference for all Ghost configuration options including command-line fl
 | Flag | Short | Description | Required | Default |
 |------|-------|-------------|----------|---------|
 | `--input` | `-i` | Input file to redirect to stdin | ✅ Yes | - |
-| `--output` | `-o` | Output file to capture stdout | ✅ Yes | - |
-| `--stderr` | `-e` | Error file to capture stderr | ✅ Yes | - |
+| `--output` | `-o` | Output file to capture stdout (supports `local:remote` syntax) | ✅ Yes | - |
+| `--stderr` | `-e` | Error file to capture stderr (supports `local:remote` syntax) | ✅ Yes | - |
 | `--verbose` | `-v` | Show stderr on terminal while capturing | No | `false` |
 | `--timeout` | `-t` | Execution timeout (e.g., 30s, 2m, 500ms) | No | - |
 | `--score` | - | Optional score (0 if command fails) | No | - |
@@ -148,6 +148,27 @@ Optional fields:
 - `prefix`: Path prefix for uploaded files
 - `use_ssl`: Enable SSL/TLS (default: true for S3, false for localhost)
 - `region`: AWS region (for S3)
+
+#### Output File Upload Syntax
+
+The output and stderr flags support `local:remote` syntax when using upload providers:
+
+Format: `local_path:remote_path`
+- **With colon**: Saves to `local_path` and uploads to `remote_path`
+- **Without colon** (backward compatible): Creates temp file, uploads to specified path
+- Allows keeping local copies while uploading to remote storage
+
+Examples:
+```bash
+# Save locally AND upload
+-o local_output.txt:remote/output.txt
+
+# Backward compatible (temp file, upload only)
+-o remote/output.txt
+
+# Mixed usage
+-o results.log:uploads/results.log -e /dev/null
+```
 
 #### Additional Files Upload
 

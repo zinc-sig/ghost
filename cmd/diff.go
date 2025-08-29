@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -75,24 +76,77 @@ func diffCommand(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Parse output paths to support local:remote syntax
+	outputPaths := helpers.ParseOutputPaths(diffOutputFile, diffStderrFile)
+
+	// Determine remote paths for display (what will be uploaded)
+	displayOutputPath := diffOutputFile
+	displayStderrPath := diffStderrFile
+	if provider != nil {
+		displayOutputPath = outputPaths.RemoteOutput
+		displayStderrPath = outputPaths.RemoteStderr
+	}
+
 	// Print upload info in verbose or dry run mode
 	if provider != nil && (diffCommonFlags.Verbose || diffCommonFlags.DryRun) {
-		helpers.PrintUploadInfo(provider, uploadConf, diffOutputFile, diffStderrFile, additionalFiles, diffCommonFlags.DryRun)
+		helpers.PrintUploadInfo(provider, uploadConf, displayOutputPath, displayStderrPath, additionalFiles, diffCommonFlags.DryRun)
 	}
 
 	// Determine actual execution paths
 	actualOutputFile := diffOutputFile
 	actualStderrFile := diffStderrFile
+	var cleanup func()
 
-	if provider != nil {
-		// Create temp files for execution when upload is configured
-		tempOut, tempErr, cleanup, err := helpers.CreateTempFiles("diff")
-		if err != nil {
-			return err
+	// When no upload provider, use the paths as-is
+	if provider == nil {
+		// Parse the paths in case they have colons, but use local paths
+		if outputPaths.LocalOutput != "" {
+			actualOutputFile = outputPaths.LocalOutput
 		}
+		if outputPaths.LocalStderr != "" {
+			actualStderrFile = outputPaths.LocalStderr
+		}
+	} else {
+		// Check if we need temp files or should use local paths
+		if outputPaths.LocalOutput != "" {
+			// User specified local path, use it directly
+			actualOutputFile = outputPaths.LocalOutput
+		} else {
+			// Backward compatible: create temp file for output
+			tempOut, err := os.CreateTemp("", "ghost-diff-output-*.txt")
+			if err != nil {
+				return fmt.Errorf("failed to create temp output file: %w", err)
+			}
+			actualOutputFile = tempOut.Name()
+			_ = tempOut.Close()
+			cleanup = func() { _ = os.Remove(actualOutputFile) }
+		}
+
+		if outputPaths.LocalStderr != "" {
+			// User specified local path, use it directly
+			actualStderrFile = outputPaths.LocalStderr
+		} else {
+			// Backward compatible: create temp file for stderr
+			tempErr, err := os.CreateTemp("", "ghost-diff-stderr-*.txt")
+			if err != nil {
+				return fmt.Errorf("failed to create temp stderr file: %w", err)
+			}
+			actualStderrFile = tempErr.Name()
+			_ = tempErr.Close()
+			if cleanup == nil {
+				cleanup = func() { _ = os.Remove(actualStderrFile) }
+			} else {
+				oldCleanup := cleanup
+				cleanup = func() {
+					oldCleanup()
+					_ = os.Remove(actualStderrFile)
+				}
+			}
+		}
+	}
+
+	if cleanup != nil {
 		defer cleanup()
-		actualOutputFile = tempOut
-		actualStderrFile = tempErr
 	}
 
 	// Build args for diff command
@@ -135,9 +189,10 @@ func diffCommand(cmd *cobra.Command, args []string) error {
 			}
 		}
 
+		// Map actual files to remote paths
 		files := map[string]string{
-			actualOutputFile: diffOutputFile,
-			actualStderrFile: diffStderrFile,
+			actualOutputFile: outputPaths.RemoteOutput,
+			actualStderrFile: outputPaths.RemoteStderr,
 		}
 		if err := helpers.HandleUploads(provider, files, additionalFiles, diffCommonFlags.Verbose, diffCommonFlags.DryRun); err != nil {
 			return err

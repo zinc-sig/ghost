@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/zinc-sig/ghost/cmd/config"
@@ -26,7 +27,7 @@ var (
 var runCmd = &cobra.Command{
 	Use:   "run [flags] -- <command> [args...]",
 	Short: "Execute a command with structured output",
-	Long: `Execute a command while capturing execution metadata including exit codes, 
+	Long: `Execute a command while capturing execution metadata including exit codes,
 timing information, and optional scoring. Results are output as JSON.
 
 The '--' separator is required to distinguish ghost flags from the target command.`,
@@ -70,24 +71,77 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Parse output paths to support local:remote syntax
+	outputPaths := helpers.ParseOutputPaths(outputFile, stderrFile)
+
+	// Determine remote paths for display (what will be uploaded)
+	displayOutputPath := outputFile
+	displayStderrPath := stderrFile
+	if provider != nil {
+		displayOutputPath = outputPaths.RemoteOutput
+		displayStderrPath = outputPaths.RemoteStderr
+	}
+
 	// Print upload info in verbose or dry run mode
 	if provider != nil && (runFlags.Verbose || runFlags.DryRun) {
-		helpers.PrintUploadInfo(provider, uploadConf, outputFile, stderrFile, additionalFiles, runFlags.DryRun)
+		helpers.PrintUploadInfo(provider, uploadConf, displayOutputPath, displayStderrPath, additionalFiles, runFlags.DryRun)
 	}
 
 	// Determine actual execution paths
 	actualOutputFile := outputFile
 	actualStderrFile := stderrFile
+	var cleanup func()
 
-	if provider != nil {
-		// Create temp files for execution when upload is configured
-		tempOut, tempErr, cleanup, err := helpers.CreateTempFiles("run")
-		if err != nil {
-			return err
+	// When no upload provider, use the paths as-is
+	if provider == nil {
+		// Parse the paths in case they have colons, but use local paths
+		if outputPaths.LocalOutput != "" {
+			actualOutputFile = outputPaths.LocalOutput
 		}
+		if outputPaths.LocalStderr != "" {
+			actualStderrFile = outputPaths.LocalStderr
+		}
+	} else {
+		// Check if we need temp files or should use local paths
+		if outputPaths.LocalOutput != "" {
+			// User specified local path, use it directly
+			actualOutputFile = outputPaths.LocalOutput
+		} else {
+			// Backward compatible: create temp file for output
+			tempOut, err := os.CreateTemp("", "ghost-run-output-*.txt")
+			if err != nil {
+				return fmt.Errorf("failed to create temp output file: %w", err)
+			}
+			actualOutputFile = tempOut.Name()
+			_ = tempOut.Close()
+			cleanup = func() { _ = os.Remove(actualOutputFile) }
+		}
+
+		if outputPaths.LocalStderr != "" {
+			// User specified local path, use it directly
+			actualStderrFile = outputPaths.LocalStderr
+		} else {
+			// Backward compatible: create temp file for stderr
+			tempErr, err := os.CreateTemp("", "ghost-run-stderr-*.txt")
+			if err != nil {
+				return fmt.Errorf("failed to create temp stderr file: %w", err)
+			}
+			actualStderrFile = tempErr.Name()
+			_ = tempErr.Close()
+			if cleanup == nil {
+				cleanup = func() { _ = os.Remove(actualStderrFile) }
+			} else {
+				oldCleanup := cleanup
+				cleanup = func() {
+					oldCleanup()
+					_ = os.Remove(actualStderrFile)
+				}
+			}
+		}
+	}
+
+	if cleanup != nil {
 		defer cleanup()
-		actualOutputFile = tempOut
-		actualStderrFile = tempErr
 	}
 
 	config := &runner.Config{
@@ -115,9 +169,10 @@ func runCommand(cmd *cobra.Command, args []string) error {
 			}
 		}
 
+		// Map actual files to remote paths
 		files := map[string]string{
-			actualOutputFile: outputFile,
-			actualStderrFile: stderrFile,
+			actualOutputFile: outputPaths.RemoteOutput,
+			actualStderrFile: outputPaths.RemoteStderr,
 		}
 		if err := helpers.HandleUploads(provider, files, additionalFiles, runFlags.Verbose, runFlags.DryRun); err != nil {
 			return err

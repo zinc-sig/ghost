@@ -252,8 +252,8 @@ done
 #!/bin/bash
 # ci-pipeline.sh
 
-# Build stage with artifact upload
-ghost run -i /dev/null -o build.log -e build-errors.log \
+# Build stage with artifact upload and local copies
+ghost run -i /dev/null -o local/build.log:logs/build.log -e local/errors.log:logs/errors.log \
   --upload-provider minio \
   --upload-config-kv "bucket=ci-artifacts" \
   --upload-config-kv "prefix=builds/${BUILD_ID}/" \
