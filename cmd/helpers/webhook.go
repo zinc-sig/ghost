@@ -9,6 +9,19 @@ import (
 	"github.com/zinc-sig/ghost/internal/webhook"
 )
 
+// Default webhook configuration constants
+const (
+	DefaultWebhookTimeout     = "30s"
+	DefaultWebhookRetryDelay  = "1s"
+	DefaultWebhookRetries     = 3
+	DefaultWebhookMethod      = "POST"
+	DefaultWebhookAuthType    = "none"
+	WebhookRetryMultiplier    = 2.0
+)
+
+// WebhookMaxRetryDelay is the maximum delay between retry attempts in exponential backoff
+var WebhookMaxRetryDelay = 30 * time.Second
+
 // BuildWebhookConfig builds webhook configuration from all sources
 func BuildWebhookConfig(cfg *config.WebhookConfig) (map[string]any, error) {
 	// Use the generic builder with all configuration sources
@@ -37,22 +50,22 @@ func BuildWebhookConfig(cfg *config.WebhookConfig) (map[string]any, error) {
 	if cfg.URL != "" {
 		webhookConf["url"] = cfg.URL
 	}
-	if cfg.Method != "" && cfg.Method != "POST" {
+	if cfg.Method != "" && cfg.Method != DefaultWebhookMethod {
 		webhookConf["method"] = cfg.Method
 	}
-	if cfg.AuthType != "" && cfg.AuthType != "none" {
+	if cfg.AuthType != "" && cfg.AuthType != DefaultWebhookAuthType {
 		webhookConf["auth_type"] = cfg.AuthType
 	}
 	if cfg.AuthToken != "" {
 		webhookConf["auth_token"] = cfg.AuthToken
 	}
-	if cfg.Timeout != "" && cfg.Timeout != "30s" {
+	if cfg.Timeout != "" && cfg.Timeout != DefaultWebhookTimeout {
 		webhookConf["timeout"] = cfg.Timeout
 	}
-	if cfg.Retries != 3 {
+	if cfg.Retries != DefaultWebhookRetries {
 		webhookConf["retries"] = cfg.Retries
 	}
-	if cfg.RetryDelay != "" && cfg.RetryDelay != "1s" {
+	if cfg.RetryDelay != "" && cfg.RetryDelay != DefaultWebhookRetryDelay {
 		webhookConf["retry_delay"] = cfg.RetryDelay
 	}
 
@@ -74,7 +87,8 @@ func ParseWebhookConfigToInternal(cfg *config.WebhookConfig) (*webhook.Config, *
 	}
 
 	// Parse webhook timeout
-	var webhookTimeoutDur time.Duration = 30 * time.Second
+	defaultTimeout, _ := time.ParseDuration(DefaultWebhookTimeout)
+	var webhookTimeoutDur time.Duration = defaultTimeout
 	if timeout, ok := configMap["timeout"].(string); ok && timeout != "" {
 		webhookTimeoutDur, err = time.ParseDuration(timeout)
 		if err != nil {
@@ -83,7 +97,8 @@ func ParseWebhookConfigToInternal(cfg *config.WebhookConfig) (*webhook.Config, *
 	}
 
 	// Parse retry delay
-	var retryDelay time.Duration = 1 * time.Second
+	defaultRetryDelay, _ := time.ParseDuration(DefaultWebhookRetryDelay)
+	var retryDelay time.Duration = defaultRetryDelay
 	if delay, ok := configMap["retry_delay"].(string); ok && delay != "" {
 		retryDelay, err = time.ParseDuration(delay)
 		if err != nil {
@@ -94,18 +109,18 @@ func ParseWebhookConfigToInternal(cfg *config.WebhookConfig) (*webhook.Config, *
 	// Get HTTP method (default to POST)
 	method, _ := configMap["method"].(string)
 	if method == "" {
-		method = "POST"
+		method = DefaultWebhookMethod
 	}
 	
 	// Get auth settings
 	authType, _ := configMap["auth_type"].(string)
 	if authType == "" {
-		authType = "none"
+		authType = DefaultWebhookAuthType
 	}
 	authToken, _ := configMap["auth_token"].(string)
 	
 	// Get retries (handle both int and float64 from JSON)
-	maxRetries := 3
+	maxRetries := DefaultWebhookRetries
 	if r, ok := configMap["retries"].(int); ok {
 		maxRetries = r
 	} else if r, ok := configMap["retries"].(float64); ok {
@@ -123,8 +138,8 @@ func ParseWebhookConfigToInternal(cfg *config.WebhookConfig) (*webhook.Config, *
 	retryConfig := &webhook.RetryConfig{
 		MaxRetries:   maxRetries,
 		InitialDelay: retryDelay,
-		MaxDelay:     30 * time.Second,
-		Multiplier:   2.0,
+		MaxDelay:     WebhookMaxRetryDelay,
+		Multiplier:   WebhookRetryMultiplier,
 	}
 
 	return webhookConfig, retryConfig, nil

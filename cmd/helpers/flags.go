@@ -32,12 +32,12 @@ func SetupCommonFlags(cmd *cobra.Command, flags *config.CommonFlags) {
 func SetupWebhookFlags(cmd *cobra.Command, cfg *config.WebhookConfig) {
 	// Direct configuration flags
 	cmd.Flags().StringVar(&cfg.URL, "webhook-url", "", "Webhook URL to send results to")
-	cmd.Flags().StringVar(&cfg.Method, "webhook-method", "POST", "HTTP method to use: GET, POST, PUT, PATCH, DELETE")
-	cmd.Flags().StringVar(&cfg.AuthType, "webhook-auth-type", "none", "Authentication type: none, bearer, api-key")
+	cmd.Flags().StringVar(&cfg.Method, "webhook-method", DefaultWebhookMethod, "HTTP method to use: GET, POST, PUT, PATCH, DELETE")
+	cmd.Flags().StringVar(&cfg.AuthType, "webhook-auth-type", DefaultWebhookAuthType, "Authentication type: none, bearer, api-key")
 	cmd.Flags().StringVar(&cfg.AuthToken, "webhook-auth-token", "", "Authentication token (use with --webhook-auth-type)")
-	cmd.Flags().IntVar(&cfg.Retries, "webhook-retries", 3, "Maximum webhook retry attempts (0 = no retries)")
-	cmd.Flags().StringVar(&cfg.RetryDelay, "webhook-retry-delay", "1s", "Initial delay between webhook retries")
-	cmd.Flags().StringVar(&cfg.Timeout, "webhook-timeout", "30s", "Total timeout for webhook including retries")
+	cmd.Flags().IntVar(&cfg.Retries, "webhook-retries", DefaultWebhookRetries, "Maximum webhook retry attempts (0 = no retries)")
+	cmd.Flags().StringVar(&cfg.RetryDelay, "webhook-retry-delay", DefaultWebhookRetryDelay, "Initial delay between webhook retries")
+	cmd.Flags().StringVar(&cfg.Timeout, "webhook-timeout", DefaultWebhookTimeout, "Total timeout for webhook including retries")
 	
 	// Alternative configuration methods
 	cmd.Flags().StringVar(&cfg.Config, "webhook-config", "", "Webhook configuration as JSON string")
