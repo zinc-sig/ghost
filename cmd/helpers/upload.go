@@ -1,22 +1,23 @@
-package cmd
+package helpers
 
 import (
 	"context"
 	"fmt"
 	"os"
 
+	"github.com/zinc-sig/ghost/cmd/config"
 	contextparser "github.com/zinc-sig/ghost/internal/context"
 	"github.com/zinc-sig/ghost/internal/upload"
 )
 
 // BuildUploadConfig builds upload configuration from all sources
-func BuildUploadConfig(config *UploadConfig) (map[string]any, error) {
+func BuildUploadConfig(cfg *config.UploadConfig) (map[string]any, error) {
 	// Use the new generic builder with GHOST_UPLOAD_CONFIG prefix
 	result, err := contextparser.BuildContextWithPrefix(
 		"GHOST_UPLOAD_CONFIG",
-		config.Config,
-		config.ConfigKV,
-		config.ConfigFile,
+		cfg.Config,
+		cfg.ConfigKV,
+		cfg.ConfigFile,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build upload config: %w", err)
@@ -36,17 +37,17 @@ func BuildUploadConfig(config *UploadConfig) (map[string]any, error) {
 // parseUploadEnv and toLowerSnakeCase are no longer needed - using ParseEnvWithPrefix
 
 // SetupUploadProvider creates and configures an upload provider
-func SetupUploadProvider(config *UploadConfig) (upload.Provider, map[string]any, error) {
-	if config.Provider == "" {
+func SetupUploadProvider(cfg *config.UploadConfig) (upload.Provider, map[string]any, error) {
+	if cfg.Provider == "" {
 		return nil, nil, nil
 	}
 
-	uploadConf, err := BuildUploadConfig(config)
+	uploadConf, err := BuildUploadConfig(cfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to build upload config: %w", err)
 	}
 
-	provider, err := upload.NewProvider(config.Provider)
+	provider, err := upload.NewProvider(cfg.Provider)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create upload provider: %w", err)
 	}

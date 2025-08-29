@@ -1,15 +1,16 @@
-package cmd
+package helpers
 
 import (
 	"fmt"
 	"time"
 
+	"github.com/zinc-sig/ghost/cmd/config"
 	contextparser "github.com/zinc-sig/ghost/internal/context"
 	"github.com/zinc-sig/ghost/internal/webhook"
 )
 
 // BuildWebhookConfig builds webhook configuration from all sources
-func BuildWebhookConfig(config *WebhookConfig) (map[string]any, error) {
+func BuildWebhookConfig(cfg *config.WebhookConfig) (map[string]any, error) {
 	// Convert WebhookConfig to strings for the generic builder
 	// Note: The WebhookConfig has some non-string fields that need special handling
 	
@@ -35,39 +36,39 @@ func BuildWebhookConfig(config *WebhookConfig) (map[string]any, error) {
 	}
 
 	// Override with explicit flag values if set
-	if config.URL != "" {
-		webhookConf["url"] = config.URL
+	if cfg.URL != "" {
+		webhookConf["url"] = cfg.URL
 	}
-	if config.AuthType != "" && config.AuthType != "none" {
-		webhookConf["auth_type"] = config.AuthType
+	if cfg.AuthType != "" && cfg.AuthType != "none" {
+		webhookConf["auth_type"] = cfg.AuthType
 	}
-	if config.AuthToken != "" {
-		webhookConf["auth_token"] = config.AuthToken
+	if cfg.AuthToken != "" {
+		webhookConf["auth_token"] = cfg.AuthToken
 	}
-	if config.Timeout != "" && config.Timeout != "30s" {
-		webhookConf["timeout"] = config.Timeout
+	if cfg.Timeout != "" && cfg.Timeout != "30s" {
+		webhookConf["timeout"] = cfg.Timeout
 	}
-	if config.Retries != 3 {
-		webhookConf["retries"] = config.Retries
+	if cfg.Retries != 3 {
+		webhookConf["retries"] = cfg.Retries
 	}
-	if config.RetryDelay != "" && config.RetryDelay != "1s" {
-		webhookConf["retry_delay"] = config.RetryDelay
+	if cfg.RetryDelay != "" && cfg.RetryDelay != "1s" {
+		webhookConf["retry_delay"] = cfg.RetryDelay
 	}
 
 	return webhookConf, nil
 }
 
 // ParseWebhookConfigToInternal converts WebhookConfig to internal webhook structures
-func ParseWebhookConfigToInternal(config *WebhookConfig) (*webhook.Config, *webhook.RetryConfig, error) {
-	if config.URL == "" {
+func ParseWebhookConfigToInternal(cfg *config.WebhookConfig) (*webhook.Config, *webhook.RetryConfig, error) {
+	if cfg.URL == "" {
 		return nil, nil, nil // No webhook configured
 	}
 
 	// Parse webhook timeout
 	var webhookTimeoutDur time.Duration
-	if config.Timeout != "" {
+	if cfg.Timeout != "" {
 		var err error
-		webhookTimeoutDur, err = time.ParseDuration(config.Timeout)
+		webhookTimeoutDur, err = time.ParseDuration(cfg.Timeout)
 		if err != nil {
 			return nil, nil, fmt.Errorf("invalid webhook timeout duration: %w", err)
 		}
@@ -77,9 +78,9 @@ func ParseWebhookConfigToInternal(config *WebhookConfig) (*webhook.Config, *webh
 
 	// Parse retry delay
 	var retryDelay time.Duration
-	if config.RetryDelay != "" {
+	if cfg.RetryDelay != "" {
 		var err error
-		retryDelay, err = time.ParseDuration(config.RetryDelay)
+		retryDelay, err = time.ParseDuration(cfg.RetryDelay)
 		if err != nil {
 			return nil, nil, fmt.Errorf("invalid webhook retry delay: %w", err)
 		}
@@ -88,15 +89,15 @@ func ParseWebhookConfigToInternal(config *WebhookConfig) (*webhook.Config, *webh
 	}
 
 	webhookConfig := &webhook.Config{
-		URL:       config.URL,
+		URL:       cfg.URL,
 		Method:    "POST",
 		Timeout:   webhookTimeoutDur,
-		AuthType:  config.AuthType,
-		AuthToken: config.AuthToken,
+		AuthType:  cfg.AuthType,
+		AuthToken: cfg.AuthToken,
 	}
 
 	retryConfig := &webhook.RetryConfig{
-		MaxRetries:   config.Retries,
+		MaxRetries:   cfg.Retries,
 		InitialDelay: retryDelay,
 		MaxDelay:     30 * time.Second,
 		Multiplier:   2.0,
@@ -106,42 +107,42 @@ func ParseWebhookConfigToInternal(config *WebhookConfig) (*webhook.Config, *webh
 }
 
 // MergeWebhookConfigFromEnv merges environment variables into WebhookConfig
-func MergeWebhookConfigFromEnv(config *WebhookConfig) error {
+func MergeWebhookConfigFromEnv(cfg *config.WebhookConfig) error {
 	// Get environment configuration
-	envConfig, err := BuildWebhookConfig(config)
+	envConfig, err := BuildWebhookConfig(cfg)
 	if err != nil {
 		return err
 	}
 
 	// Apply environment values if flags are not set
-	if config.URL == "" {
+	if cfg.URL == "" {
 		if url, ok := envConfig["url"].(string); ok {
-			config.URL = url
+			cfg.URL = url
 		}
 	}
-	if config.AuthType == "none" || config.AuthType == "" {
+	if cfg.AuthType == "none" || cfg.AuthType == "" {
 		if authType, ok := envConfig["auth_type"].(string); ok {
-			config.AuthType = authType
+			cfg.AuthType = authType
 		}
 	}
-	if config.AuthToken == "" {
+	if cfg.AuthToken == "" {
 		if authToken, ok := envConfig["auth_token"].(string); ok {
-			config.AuthToken = authToken
+			cfg.AuthToken = authToken
 		}
 	}
-	if config.Timeout == "30s" || config.Timeout == "" {
+	if cfg.Timeout == "30s" || cfg.Timeout == "" {
 		if timeout, ok := envConfig["timeout"].(string); ok {
-			config.Timeout = timeout
+			cfg.Timeout = timeout
 		}
 	}
-	if config.Retries == 3 {
+	if cfg.Retries == 3 {
 		if retries, ok := envConfig["retries"].(int); ok {
-			config.Retries = retries
+			cfg.Retries = retries
 		}
 	}
-	if config.RetryDelay == "1s" || config.RetryDelay == "" {
+	if cfg.RetryDelay == "1s" || cfg.RetryDelay == "" {
 		if retryDelay, ok := envConfig["retry_delay"].(string); ok {
-			config.RetryDelay = retryDelay
+			cfg.RetryDelay = retryDelay
 		}
 	}
 

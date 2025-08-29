@@ -1,4 +1,4 @@
-package cmd
+package helpers
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/zinc-sig/ghost/cmd/config"
 	"github.com/zinc-sig/ghost/internal/output"
 	"github.com/zinc-sig/ghost/internal/runner"
 	"github.com/zinc-sig/ghost/internal/webhook"
@@ -13,7 +14,7 @@ import (
 
 // createJSONResult creates a JSON result from execution results
 // The expectedPath parameter is optional - pass empty string for run command
-func createJSONResult(inputPath, outputPath, stderrPath, expectedPath string, result *runner.Result, timeoutMs int64, scoreSet bool, score int, context any) *output.Result {
+func CreateJSONResult(inputPath, outputPath, stderrPath, expectedPath string, result *runner.Result, timeoutMs int64, scoreSet bool, score int, context any) *output.Result {
 	jsonResult := &output.Result{
 		Command:       result.Command,
 		Status:        string(result.Status),
@@ -47,13 +48,9 @@ func createJSONResult(inputPath, outputPath, stderrPath, expectedPath string, re
 	return jsonResult
 }
 
-// createDiffJSONResult is now deprecated - use createJSONResult with expectedPath parameter
-func createDiffJSONResult(inputPath, expectedPath, outputPath, stderrPath string, result *runner.Result, timeoutMs int64, scoreSet bool, score int, context any) *output.Result {
-	return createJSONResult(inputPath, outputPath, stderrPath, expectedPath, result, timeoutMs, scoreSet, score, context)
-}
 
 // outputJSON marshals and prints the result as JSON
-func outputJSON(result *output.Result) error {
+func OutputJSON(result *output.Result) error {
 	jsonOutput, err := json.Marshal(result)
 	if err != nil {
 		return fmt.Errorf("failed to marshal JSON output: %w", err)
@@ -71,34 +68,42 @@ var (
 	diffRetryConfig         *webhook.RetryConfig
 )
 
-// parseWebhookConfig parses webhook configuration for run command
-func parseWebhookConfig(config *WebhookConfig) error {
+// ResetWebhookConfigs resets the global webhook configurations (for testing)
+func ResetWebhookConfigs() {
+	runWebhookConfigParsed = nil
+	runRetryConfig = nil
+	diffWebhookConfigParsed = nil
+	diffRetryConfig = nil
+}
+
+// ParseWebhookConfig parses webhook configuration for the specified command
+func ParseWebhookConfig(config *config.WebhookConfig, isRunCommand bool) error {
 	// Merge environment variables
 	if err := MergeWebhookConfigFromEnv(config); err != nil {
 		return err
 	}
 
 	// Parse to internal structures
-	var err error
-	runWebhookConfigParsed, runRetryConfig, err = ParseWebhookConfigToInternal(config)
-	return err
-}
-
-// parseDiffWebhookConfig parses webhook configuration for diff command
-func parseDiffWebhookConfig(config *WebhookConfig) error {
-	// Merge environment variables
-	if err := MergeWebhookConfigFromEnv(config); err != nil {
+	webhookConfig, retryConfig, err := ParseWebhookConfigToInternal(config)
+	if err != nil {
 		return err
 	}
 
-	// Parse to internal structures
-	var err error
-	diffWebhookConfigParsed, diffRetryConfig, err = ParseWebhookConfigToInternal(config)
-	return err
+	// Store in appropriate global variables based on command type
+	if isRunCommand {
+		runWebhookConfigParsed = webhookConfig
+		runRetryConfig = retryConfig
+	} else {
+		diffWebhookConfigParsed = webhookConfig
+		diffRetryConfig = retryConfig
+	}
+
+	return nil
 }
+
 
 // outputJSONAndWebhook outputs JSON to stdout and optionally sends to webhook
-func outputJSONAndWebhook(result *output.Result, verbose bool) error {
+func OutputJSONAndWebhook(result *output.Result, verbose bool) error {
 	// Determine which webhook config to use based on command
 	var config *webhook.Config
 	var retryConfig *webhook.RetryConfig
@@ -139,5 +144,5 @@ func outputJSONAndWebhook(result *output.Result, verbose bool) error {
 	}
 
 	// Always output to stdout
-	return outputJSON(result)
+	return OutputJSON(result)
 }
