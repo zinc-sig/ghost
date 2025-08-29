@@ -45,6 +45,7 @@ Common diff flags for grading:
 | `--upload-config` | Configuration as JSON | `'{"endpoint": "localhost:9000"}'` |
 | `--upload-config-kv` | Config key=value pairs (repeatable) | `"bucket=results"` |
 | `--upload-config-file` | Path to config JSON file | `upload-config.json` |
+| `--upload-files` | Additional files to upload (repeatable) | `"output.bin"` or `"local.txt:remote/path.txt"` |
 
 ### Webhook Configuration Flags
 
@@ -147,6 +148,30 @@ Optional fields:
 - `prefix`: Path prefix for uploaded files
 - `use_ssl`: Enable SSL/TLS (default: true for S3, false for localhost)
 - `region`: AWS region (for S3)
+
+#### Additional Files Upload
+
+The `--upload-files` flag allows uploading files created by your command alongside the standard output/stderr files.
+
+Format: `local_path[:remote_path]`
+- If remote path is omitted, the local path is used as the remote path
+- Can be specified multiple times for multiple files
+- Files are validated to exist after command execution
+- All uploads respect the configured prefix
+
+Examples:
+```bash
+# Upload with same local/remote path
+--upload-files "output.bin"
+
+# Upload with different remote path  
+--upload-files "local.txt:remote/path.txt"
+
+# Multiple files
+--upload-files "result1.csv" \
+--upload-files "result2.csv:data/result2.csv" \
+--upload-files "summary.json:reports/summary.json"
+```
 
 Example configuration:
 ```json

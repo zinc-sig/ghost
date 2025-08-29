@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/zinc-sig/ghost/cmd/config"
 	contextparser "github.com/zinc-sig/ghost/internal/context"
@@ -36,6 +37,60 @@ func BuildUploadConfig(cfg *config.UploadConfig) (map[string]any, error) {
 
 // parseUploadEnv and toLowerSnakeCase are no longer needed - using ParseEnvWithPrefix
 
+// ParseUploadFiles parses the upload files list and returns a map of local to remote paths
+// Format: local[:remote] where remote is optional (defaults to local path)
+func ParseUploadFiles(files []string) (map[string]string, error) {
+	result := make(map[string]string)
+
+	for _, file := range files {
+		if file == "" {
+			continue
+		}
+
+		var localPath, remotePath string
+		parts := strings.SplitN(file, ":", 2)
+
+		if len(parts) == 2 {
+			// Explicit mapping: local:remote
+			localPath = strings.TrimSpace(parts[0])
+			remotePath = strings.TrimSpace(parts[1])
+		} else {
+			// No colon: use same path for both
+			localPath = strings.TrimSpace(file)
+			remotePath = localPath
+		}
+
+		if localPath == "" {
+			return nil, fmt.Errorf("empty local path in upload file specification: %s", file)
+		}
+		if remotePath == "" {
+			return nil, fmt.Errorf("empty remote path in upload file specification: %s", file)
+		}
+
+		// Check for duplicate local paths
+		if _, exists := result[localPath]; exists {
+			return nil, fmt.Errorf("duplicate local path in upload files: %s", localPath)
+		}
+
+		result[localPath] = remotePath
+	}
+
+	return result, nil
+}
+
+// ValidateUploadFiles checks if all specified files exist
+func ValidateUploadFiles(files map[string]string) error {
+	for localPath := range files {
+		if _, err := os.Stat(localPath); err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("upload file does not exist: %s", localPath)
+			}
+			return fmt.Errorf("failed to check upload file %s: %w", localPath, err)
+		}
+	}
+	return nil
+}
+
 // SetupUploadProvider creates and configures an upload provider
 func SetupUploadProvider(cfg *config.UploadConfig, dryRun bool) (upload.Provider, map[string]any, error) {
 	if cfg.Provider == "" {
@@ -63,21 +118,40 @@ func SetupUploadProvider(cfg *config.UploadConfig, dryRun bool) (upload.Provider
 }
 
 // HandleUploads uploads files using the provider
-func HandleUploads(provider upload.Provider, files map[string]string, verbose bool, dryRun bool) error {
+// files: map of standard output/error files (local -> remote)
+// additionalFiles: map of additional files to upload (local -> remote)
+func HandleUploads(provider upload.Provider, files map[string]string, additionalFiles map[string]string, verbose bool, dryRun bool) error {
 	if provider == nil {
 		return nil
 	}
 
+	// Merge all files to upload
+	allFiles := make(map[string]string)
+	for k, v := range files {
+		allFiles[k] = v
+	}
+	for k, v := range additionalFiles {
+		if _, exists := allFiles[k]; exists {
+			return fmt.Errorf("additional file conflicts with standard output file: %s", k)
+		}
+		allFiles[k] = v
+	}
+
 	if dryRun {
 		fmt.Fprintln(os.Stderr, "[DRY RUN] Would upload the following files:")
+		// Show standard files first
 		for localPath, remotePath := range files {
-			fmt.Fprintf(os.Stderr, "  %s → %s\n", localPath, remotePath)
+			fmt.Fprintf(os.Stderr, "  %s → %s (standard)\n", localPath, remotePath)
+		}
+		// Then show additional files
+		for localPath, remotePath := range additionalFiles {
+			fmt.Fprintf(os.Stderr, "  %s → %s (additional)\n", localPath, remotePath)
 		}
 		return nil
 	}
 
 	ctx := context.Background()
-	for localPath, remotePath := range files {
+	for localPath, remotePath := range allFiles {
 		reader, err := os.Open(localPath)
 		if err != nil {
 			return fmt.Errorf("failed to open %s for upload: %w", localPath, err)
@@ -96,7 +170,7 @@ func HandleUploads(provider upload.Provider, files map[string]string, verbose bo
 }
 
 // PrintUploadInfo prints upload configuration in verbose mode
-func PrintUploadInfo(provider upload.Provider, config map[string]any, outputPath, stderrPath string, dryRun bool) {
+func PrintUploadInfo(provider upload.Provider, config map[string]any, outputPath, stderrPath string, additionalFiles map[string]string, dryRun bool) {
 	header := "Upload Configuration"
 	if dryRun {
 		header = "Upload Configuration (DRY RUN)"
@@ -128,5 +202,14 @@ func PrintUploadInfo(provider upload.Provider, config map[string]any, outputPath
 
 	fmt.Fprintf(os.Stderr, "Output Path:    %s\n", outputPath)
 	fmt.Fprintf(os.Stderr, "Stderr Path:    %s\n", stderrPath)
+
+	// Print additional files if any
+	if len(additionalFiles) > 0 {
+		fmt.Fprintln(os.Stderr, "Additional Files:")
+		for localPath, remotePath := range additionalFiles {
+			fmt.Fprintf(os.Stderr, "  %s → %s\n", localPath, remotePath)
+		}
+	}
+
 	fmt.Fprintln(os.Stderr, "----------------------------------------")
 }

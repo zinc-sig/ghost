@@ -18,6 +18,7 @@ func SetupUploadFlags(cmd *cobra.Command, cfg *config.UploadConfig) {
 	cmd.Flags().StringVar(&cfg.Config, "upload-config", "", "Upload configuration as JSON string")
 	cmd.Flags().StringArrayVar(&cfg.ConfigKV, "upload-config-kv", nil, "Upload config key=value pairs (can be used multiple times)")
 	cmd.Flags().StringVar(&cfg.ConfigFile, "upload-config-file", "", "Path to JSON file containing upload configuration")
+	cmd.Flags().StringArrayVar(&cfg.UploadFiles, "upload-files", nil, "Additional files to upload (format: local[:remote], can be used multiple times)")
 }
 
 // SetupCommonFlags adds commonly used flags to a command

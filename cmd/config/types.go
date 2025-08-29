@@ -11,10 +11,11 @@ type ContextConfig struct {
 
 // UploadConfig holds upload-related flags
 type UploadConfig struct {
-	Provider   string
-	Config     string
-	ConfigKV   []string
-	ConfigFile string
+	Provider    string
+	Config      string
+	ConfigKV    []string
+	ConfigFile  string
+	UploadFiles []string // Additional files to upload (format: local[:remote])
 }
 
 // CommonFlags holds commonly used flags across commands
