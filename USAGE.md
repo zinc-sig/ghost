@@ -1,8 +1,17 @@
 # Ghost Usage Guide
 
-## Commands
+Comprehensive examples and patterns for using Ghost in various scenarios.
 
-Ghost provides two main commands:
+## Table of Contents
+
+- [Command Syntax](#command-syntax)
+- [Basic Usage](#basic-usage)
+- [Advanced Features](#advanced-features)
+- [Common Use Cases](#common-use-cases)
+- [JSON Output Reference](#json-output-reference)
+- [Exit Codes](#exit-codes)
+
+## Command Syntax
 
 ### Run Command
 
@@ -10,447 +19,442 @@ Ghost provides two main commands:
 ghost run [flags] -- <command> [args...]
 ```
 
-The `--` separator is required to distinguish ghost flags from the target command and its arguments.
+The `--` separator is **required** to distinguish Ghost flags from the target command and its arguments.
 
 ### Diff Command
 
 ```
-ghost diff -i <input> -x <expected> -o <output> -e <stderr> [--diff-flags <flags>] [--score <value>]
+ghost diff -i <input> -x <expected> -o <output> -e <stderr> [flags]
 ```
 
-Compare two files and get structured JSON output with execution metadata. You can pass additional flags to the underlying diff command for flexible comparison. All four I/O flags are required, maintaining consistency with the run command.
+All four I/O flags are required for consistency with the run command.
 
-## Flags
+## Basic Usage
 
-### Required Flags
-
-- `-i, --input <file>` - Redirect the specified file to the command's stdin (REQUIRED)
-- `-o, --output <file>` - Capture the command's stdout to the specified file (REQUIRED)
-- `-e, --stderr <file>` - Capture the command's stderr to the specified file (REQUIRED)
-
-### Optional Flags
-
-- `--score <integer>` - Include a score in the JSON output (conditional on exit code)
-- `-v, --verbose` - Show command stderr on terminal in addition to file
-- `-t, --timeout <duration>` - Set execution time limit (e.g., 30s, 2m, 500ms)
-- `--context <json>` - Context data as JSON string
-- `--context-kv <key=value>` - Context key=value pairs (can be used multiple times)
-- `--context-file <file>` - Path to JSON file containing context data
-- `-h, --help` - Show help information
-
-## Examples
-
-### Basic Command Execution
-
-All commands require I/O redirection flags:
+### Simple Command Execution
 
 ```bash
+# Execute a command with minimal setup
 ghost run -i /dev/null -o output.txt -e error.txt -- echo "Hello, World!"
+
+# Using actual input file
+echo "test data" > input.txt
+ghost run -i input.txt -o processed.txt -e errors.log -- cat
+
+# Command with arguments
+ghost run -i data.csv -o results.json -e stderr.log -- python process.py --format json --validate
 ```
 
-Output:
-```json
-{
-  "command": "echo Hello, World!",
-  "input": "/dev/null",
-  "output": "output.txt",
-  "stderr": "error.txt",
-  "exit_code": 0,
-  "execution_time": 12
-}
-```
-
-### With Input/Output Files
-
-Execute a command with full I/O redirection:
+### File Comparison
 
 ```bash
-ghost run -i input.txt -o output.txt -e error.log -- ./process-data
+# Basic diff
+ghost diff -i actual.txt -x expected.txt -o diff_output.txt -e errors.txt
+
+# Diff with scoring (100 if identical, 0 if different)
+ghost diff -i submission.txt -x solution.txt -o feedback.txt -e errors.txt --score 100
+
+# Ignore whitespace differences for grading
+ghost diff -i student.txt -x answer.txt -o diff.txt -e errors.txt \
+  --diff-flags "--ignore-trailing-space --ignore-blank-lines" \
+  --score 100
 ```
 
-Output:
-```json
-{
-  "command": "./process-data",
-  "input": "input.txt",
-  "output": "output.txt",
-  "stderr": "error.log", 
-  "exit_code": 0,
-  "execution_time": 1250
-}
-```
+## Advanced Features
 
-### With Scoring (Success Case)
+### Context Metadata
 
-Execute a command with scoring when it succeeds:
+Attach metadata to track execution details:
 
 ```bash
-ghost run -i input.txt -o results.txt -e errors.txt --score 95 -- python test_suite.py
-```
+# Simple key-value pairs with type inference
+ghost run -i input.txt -o output.txt -e stderr.txt \
+  --context-kv "job_id=12345" \
+  --context-kv "priority=high" \
+  --context-kv "retry_count=3" \
+  --context-kv "debug=true" \
+  -- ./process-job
 
-Output (if exit_code is 0):
-```json
+# Complex nested structures via JSON
+ghost run -i data.json -o result.json -e errors.log \
+  --context '{
+    "pipeline": {
+      "stage": "transform",
+      "version": "2.1.0"
+    },
+    "metrics": {
+      "input_size": 1024,
+      "expected_duration": 300
+    }
+  }' \
+  -- ./etl-pipeline
+
+# Loading from file
+cat > metadata.json << EOF
 {
-  "command": "python test_suite.py",
-  "input": "input.txt",
-  "output": "results.txt",
-  "stderr": "errors.txt",
-  "exit_code": 0, 
-  "execution_time": 3420,
-  "score": 95
-}
-```
-
-### With Scoring (Failure Case)
-
-Execute the same command when it fails:
-
-Output (if exit_code is non-zero):
-```json
-{
-  "command": "python test_suite.py",
-  "input": "input.txt",
-  "output": "results.txt",
-  "stderr": "errors.txt",
-  "exit_code": 1,
-  "execution_time": 890,
-  "score": 0
-}
-```
-
-### Complex Command with Arguments
-
-Execute a command with multiple arguments:
-
-```bash
-ghost run -i data.csv -o processed.csv -e errors.log -- python process.py --format csv --verbose
-```
-
-### Verbose Mode
-
-Show command errors on terminal while also capturing to file:
-
-```bash
-# Run with verbose mode to see stderr on terminal
-ghost run -i input.txt -o output.txt -e errors.txt --verbose -- ./failing-command
-
-# Short form
-ghost run -i input.txt -o output.txt -e errors.txt -v -- ./my-command
-
-# Diff with verbose to see any diff errors
-ghost diff -i actual.txt -x expected.txt -o diff.txt -e errors.txt -v
-```
-
-### With Context Metadata
-
-Context allows attaching arbitrary metadata to command executions:
-
-```bash
-# Using key-value pairs (with automatic type inference)
-ghost run -i input.txt -o output.txt -e errors.txt \
-  --context-kv "student_id=s123" \
-  --context-kv "test_number=5" \
-  --context-kv "score=95.5" \
-  --context-kv "passed=true" \
-  -- ./student_program
-
-# Using JSON string for complex structures
-ghost run -i /dev/null -o output.txt -e errors.txt \
-  --context '{"test": {"suite": "unit", "case": 3}, "tags": ["critical", "backend"]}' \
-  -- ./test_runner
-
-# Using context file
-echo '{"course": "CS101", "assignment": "hw3"}' > context.json
-ghost run -i submission.txt -o result.txt -e error.txt \
-  --context-file context.json \
-  -- python autograder.py
-
-# Using environment variables
-GHOST_CONTEXT='{"env": "production"}' \
-GHOST_CONTEXT_USER_ID=123 \
-GHOST_CONTEXT_DEBUG=true \
-ghost run -i /dev/null -o output.txt -e errors.txt -- ./app
-```
-
-## JSON Output Format
-
-Ghost always outputs JSON to stdout with the following structure:
-
-```json
-{
-  "command": "string",        // The command that was executed (always present)
-  "status": "string",         // Execution status: "success", "failed", or "timeout" (always present)
-  "input": "string",          // Input file path (always present)
-  "output": "string",         // Output file path (always present)  
-  "stderr": "string",         // Stderr file path (always present)
-  "exit_code": 0,             // Command exit code, -1 for timeout (always present)
-  "execution_time": 590,      // Execution time in milliseconds (always present)
-  "timeout": 5000,            // Timeout duration in milliseconds (only if --timeout used)
-  "score": 85,                // Score value (only if --score used)
-  "context": {                // Arbitrary metadata (only if context provided)
-    "user_id": 123,
-    "test_case": "test1"
+  "experiment": {
+    "id": "exp-2024-001",
+    "parameters": {
+      "learning_rate": 0.001,
+      "batch_size": 32
+    }
   }
 }
+EOF
+
+ghost run -i dataset.csv -o model.pkl -e training.log \
+  --context-file metadata.json \
+  -- python train.py
+
+# Combining multiple sources (precedence: kv > json > file > env)
+export GHOST_CONTEXT_ENVIRONMENT=production
+export GHOST_CONTEXT_REGION=us-east-1
+
+ghost run -i input.txt -o output.txt -e stderr.txt \
+  --context-file base-config.json \
+  --context '{"override": "from-json"}' \
+  --context-kv "override=from-kv" \
+  -- ./app
+# Result: override will be "from-kv"
 ```
 
-### Field Rules
+### Upload to Storage
 
-1. **Required Fields**: `command`, `status`, `input`, `output`, `stderr`, `exit_code` and `execution_time` are always present
-2. **Command Field**: Shows the full command that was executed including all arguments
-3. **File Fields**: `input`, `output`, `stderr` must be specified via their respective flags
-4. **Score Field**: Only present if `--score` flag is used
-   - If `exit_code` is 0: includes provided score value
-   - If `exit_code` is non-zero: score becomes 0
-5. **Context Field**: Only present if context is provided via any method
-   - Can contain any valid JSON structure (object, array, or primitive)
-   - Type inference is applied to key-value pairs
-
-## Context Support
-
-Context allows you to attach arbitrary metadata to command executions. This is useful for tracking test cases, user information, execution environments, or any other relevant metadata.
-
-### Input Methods
-
-1. **Key-Value Pairs** (`--context-kv`): Simple key=value format with automatic type inference
-   ```bash
-   --context-kv "user_id=123"      # Integer
-   --context-kv "score=95.5"        # Float  
-   --context-kv "passed=true"       # Boolean
-   --context-kv "name=Alice"        # String
-   ```
-
-2. **JSON String** (`--context`): For complex nested structures
-   ```bash
-   --context '{"metadata": {"version": 2, "tags": ["test", "integration"]}}'
-   ```
-
-3. **File** (`--context-file`): Load context from a JSON file
-   ```bash
-   --context-file metadata.json
-   ```
-
-4. **Environment Variables**: Set context through environment
-   ```bash
-   GHOST_CONTEXT='{"env": "production"}'  # JSON object
-   GHOST_CONTEXT_USER_ID=123               # Individual keys (lowercased)
-   GHOST_CONTEXT_DEBUG=true                # With type inference
-   ```
-
-### Precedence Rules
-
-When the same key appears in multiple sources:
-1. Key-value pairs (highest priority)
-2. JSON string flag
-3. Context file
-4. Environment variables (lowest priority)
-
-### Type Inference
-
-For `--context-kv` and `GHOST_CONTEXT_*` environment variables:
-- Numbers without decimals → integers: `"123"` → `123`
-- Numbers with decimals → floats: `"3.14"` → `3.14`
-- `"true"`/`"false"` → booleans: `"true"` → `true`
-- Everything else → strings: `"hello"` → `"hello"`
-
-### Examples with Context
+Upload outputs to MinIO/S3-compatible storage:
 
 ```bash
-# Automated testing with metadata
-ghost run -i test1.txt -o result1.txt -e error1.txt \
-  --context-kv "test_suite=regression" \
-  --context-kv "test_case=1" \
-  --context-kv "priority=high" \
-  --score 100 \
-  -- ./run_test
+# Using key-value configuration
+ghost run -i /dev/null -o results/test-output.txt -e results/test-errors.txt \
+  --upload-provider minio \
+  --upload-config-kv "endpoint=minio.internal:9000" \
+  --upload-config-kv "access_key=$MINIO_ACCESS_KEY" \
+  --upload-config-kv "secret_key=$MINIO_SECRET_KEY" \
+  --upload-config-kv "bucket=test-results" \
+  --upload-config-kv "prefix=$(date +%Y-%m-%d)/" \
+  -- ./run-tests.sh
 
-# Student grading system
-GHOST_CONTEXT_COURSE="CS101" \
-GHOST_CONTEXT_SEMESTER="fall2024" \
-ghost run -i submission.c -o compile.log -e compile_err.log \
-  --context-kv "student_id=s123456" \
-  --context-kv "assignment=hw3" \
+# Using JSON configuration file
+cat > s3-config.json << EOF
+{
+  "endpoint": "s3.amazonaws.com",
+  "access_key": "${AWS_ACCESS_KEY_ID}",
+  "secret_key": "${AWS_SECRET_ACCESS_KEY}",
+  "bucket": "my-app-artifacts",
+  "region": "us-west-2",
+  "prefix": "builds/",
+  "use_ssl": true
+}
+EOF
+
+ghost run -i /dev/null -o build.log -e build-errors.log \
+  --upload-provider minio \
+  --upload-config-file s3-config.json \
+  -- make build
+
+# Files are uploaded to specified paths after execution completes
+```
+
+### Webhook Integration
+
+Send results to external systems with retry logic:
+
+```bash
+# Basic webhook notification
+ghost run -i test.txt -o result.txt -e error.txt \
+  --webhook-url https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXX \
+  -- ./critical-process
+
+# With authentication and custom settings
+ghost run -i input.txt -o output.txt -e stderr.txt \
+  --webhook-url https://api.monitoring.com/v1/events \
+  --webhook-method POST \
+  --webhook-auth-type bearer \
+  --webhook-auth-token "$API_TOKEN" \
+  --webhook-retries 5 \
+  --webhook-retry-delay 2s \
+  --webhook-timeout 60s \
+  -- ./long-running-job
+
+# Webhook with upload and context (complete integration)
+ghost run -i batch.csv -o processed.csv -e processing.log \
+  --upload-provider minio \
+  --upload-config-kv "endpoint=storage.local:9000" \
+  --upload-config-kv "bucket=outputs" \
+  --webhook-url https://api.pipeline.com/notify \
+  --webhook-auth-type api-key \
+  --webhook-auth-token "$PIPELINE_API_KEY" \
+  --context-kv "batch_id=$(uuidgen)" \
+  --context-kv "processor_version=3.2.1" \
+  -- python batch_processor.py
+```
+
+### Timeout and Verbose Mode
+
+```bash
+# Set execution timeout
+ghost run -i large-dataset.csv -o analysis.json -e errors.log \
+  --timeout 5m \
+  -- python heavy_analysis.py
+
+# Verbose mode: see stderr on terminal while also capturing to file
+ghost run -i config.yml -o deployment.log -e deployment-errors.log \
+  --verbose \
+  -- kubectl apply -f config.yml
+
+# Combine timeout with verbose for debugging
+ghost run -i test-suite.txt -o test-results.xml -e test-errors.log \
   --timeout 30s \
-  -- gcc -o student_prog submission.c
+  --verbose \
+  -- npm test
+```
 
-# CI/CD pipeline with mixed sources
-echo '{"build": {"version": "1.2.3", "branch": "main"}}' > build_context.json
-ghost run -i /dev/null -o deploy.log -e deploy_err.log \
-  --context-file build_context.json \
-  --context '{"environment": "staging"}' \
-  --context-kv "deployed_by=$USER" \
-  --context-kv "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  -- ./deploy.sh
+## Common Use Cases
+
+### Automated Testing & Grading
+
+```bash
+# Grade student submissions with tolerance for formatting
+for submission in submissions/*.c; do
+  student_id=$(basename "$submission" .c)
+  
+  # Compile
+  ghost run -i /dev/null -o "results/${student_id}_compile.log" \
+    -e "results/${student_id}_compile_errors.log" \
+    --context-kv "student_id=${student_id}" \
+    --context-kv "phase=compilation" \
+    --timeout 10s \
+    -- gcc -o "/tmp/${student_id}" "$submission"
+  
+  # Run tests if compilation succeeded
+  if [ $? -eq 0 ]; then
+    ghost run -i test_input.txt -o "results/${student_id}_output.txt" \
+      -e "results/${student_id}_runtime_errors.log" \
+      --context-kv "student_id=${student_id}" \
+      --context-kv "phase=execution" \
+      --timeout 5s \
+      -- "/tmp/${student_id}"
+    
+    # Compare output with expected
+    ghost diff -i "results/${student_id}_output.txt" -x expected_output.txt \
+      -o "results/${student_id}_diff.txt" -e "results/${student_id}_diff_errors.log" \
+      --diff-flags "--ignore-trailing-space --ignore-blank-lines" \
+      --score 100 \
+      --context-kv "student_id=${student_id}" \
+      --context-kv "phase=grading"
+  fi
+done
+```
+
+### CI/CD Pipeline Integration
+
+```bash
+#!/bin/bash
+# ci-pipeline.sh
+
+# Build stage
+ghost run -i /dev/null -o build.log -e build-errors.log \
+  --context-kv "stage=build" \
+  --context-kv "commit=${GIT_COMMIT}" \
+  --context-kv "branch=${GIT_BRANCH}" \
+  --timeout 10m \
+  --webhook-url "${CI_WEBHOOK_URL}" \
+  -- make build
+
+# Test stage (only if build succeeds)
+if [ $? -eq 0 ]; then
+  ghost run -i /dev/null -o test-results.xml -e test-errors.log \
+    --context-kv "stage=test" \
+    --context-kv "commit=${GIT_COMMIT}" \
+    --score 100 \
+    --timeout 15m \
+    --webhook-url "${CI_WEBHOOK_URL}" \
+    -- make test
+fi
+
+# Deploy stage (only if tests pass)
+if [ $? -eq 0 ]; then
+  ghost run -i /dev/null -o deploy.log -e deploy-errors.log \
+    --context-kv "stage=deploy" \
+    --context-kv "environment=${DEPLOY_ENV}" \
+    --context-kv "version=${VERSION}" \
+    --upload-provider minio \
+    --upload-config-file deploy-s3.json \
+    --webhook-url "${DEPLOY_WEBHOOK_URL}" \
+    --webhook-auth-type bearer \
+    --webhook-auth-token "${DEPLOY_TOKEN}" \
+    -- ./deploy.sh
+fi
+```
+
+### Performance Benchmarking
+
+```bash
+# Run benchmarks and collect timing data
+for size in 100 1000 10000 100000; do
+  ghost run -i "data_${size}.json" -o "bench_${size}.out" -e "bench_${size}.err" \
+    --context-kv "input_size=${size}" \
+    --context-kv "algorithm=quicksort" \
+    --context-kv "timestamp=$(date -Iseconds)" \
+    --timeout 1m \
+    -- ./benchmark --size "${size}"
+done
+
+# Parse execution times from JSON output
+for size in 100 1000 10000 100000; do
+  echo "Size ${size}: $(ghost run ... | jq -r '.execution_time')ms"
+done
+```
+
+### Batch Processing with Notifications
+
+```bash
+# Process multiple files with webhook notifications
+find ./incoming -name "*.xml" | while read -r file; do
+  basename_no_ext=$(basename "$file" .xml)
+  
+  ghost run -i "$file" -o "processed/${basename_no_ext}.json" \
+    -e "errors/${basename_no_ext}.log" \
+    --context-kv "source_file=${file}" \
+    --context-kv "process_time=$(date -Iseconds)" \
+    --upload-provider minio \
+    --upload-config-kv "endpoint=storage:9000" \
+    --upload-config-kv "bucket=processed-data" \
+    --webhook-url https://api.monitoring.com/batch-status \
+    --webhook-auth-type api-key \
+    --webhook-auth-token "${MONITORING_API_KEY}" \
+    -- python xml_to_json.py
+    
+  # Move processed file
+  [ $? -eq 0 ] && mv "$file" ./completed/
+done
+```
+
+## JSON Output Reference
+
+### Standard Output Structure
+
+```json
+{
+  "command": "echo Hello World",           // Always present
+  "status": "success",                     // success | failed | timeout
+  "input": "/dev/null",                    // Always present
+  "output": "output.txt",                  // Always present
+  "stderr": "stderr.txt",                  // Always present
+  "exit_code": 0,                         // -1 for timeout
+  "execution_time": 125,                  // Milliseconds
+  "timeout": 30000,                       // Only if --timeout used
+  "score": 85,                            // Only if --score used
+  "context": {                            // Only if context provided
+    "user_id": 123,
+    "test_case": "integration_01"
+  },
+  "webhook_sent": true,                   // Only if webhook configured
+  "webhook_error": ""                     // Empty on success
+}
+```
+
+### Diff Command Output
+
+```json
+{
+  "command": "diff actual.txt expected.txt",
+  "status": "failed",                     // failed = files differ
+  "input": "actual.txt",
+  "expected": "expected.txt",             // Only in diff output
+  "output": "diff.txt",
+  "stderr": "errors.txt",
+  "exit_code": 1,                        // 0 = identical, 1 = different
+  "execution_time": 8,
+  "score": 0                              // 0 because files differ
+}
+```
+
+### Parsing Output Examples
+
+```bash
+# Extract exit code
+ghost run -i input.txt -o output.txt -e stderr.txt -- ./my-command | jq -r '.exit_code'
+
+# Check if command succeeded
+if [ "$(ghost run ... | jq -r '.status')" = "success" ]; then
+  echo "Command succeeded"
+fi
+
+# Get execution time in seconds
+ghost run ... | jq -r '.execution_time / 1000'
+
+# Extract context data
+ghost run ... | jq -r '.context.user_id'
+
+# Check webhook status
+ghost run ... | jq -r 'if .webhook_sent then "Webhook sent" else "Webhook failed: " + .webhook_error end'
 ```
 
 ## Exit Codes
 
-- **0**: Ghost executed successfully (target command exit code is captured in JSON)
-- **1**: Ghost encountered an error (flag parsing, file access, etc.)
-- **2**: Invalid command usage
+Ghost itself uses the following exit codes:
 
-## Use Cases
+- **0**: Ghost executed successfully (target command exit code is in JSON)
+- **1**: Ghost encountered an error (invalid flags, file access issues, etc.)
+- **2**: Invalid command usage (missing required flags, no command specified)
 
-### Testing Frameworks
+The target command's exit code is captured in the JSON output's `exit_code` field.
 
-```bash
-# Run tests with structured output
-ghost run -i /dev/null -o test_results.txt -e test_errors.log --score 100 -- npm test
+## Tips and Best Practices
 
-# Process multiple test files
-for file in tests/*.py; do
-  ghost run -i "$file" -o "results/$(basename $file .py).out" -e "results/$(basename $file .py).err" -- python test_runner.py
-done
-```
+1. **Always use absolute paths** when running Ghost in scripts to avoid path resolution issues
 
-### CI/CD Integration
+2. **Check Ghost's exit code first**, then parse JSON for the target command's result:
+   ```bash
+   output=$(ghost run -i in.txt -o out.txt -e err.txt -- ./cmd)
+   if [ $? -ne 0 ]; then
+     echo "Ghost failed to execute"
+     exit 1
+   fi
+   
+   exit_code=$(echo "$output" | jq -r '.exit_code')
+   if [ "$exit_code" -ne 0 ]; then
+     echo "Command failed with exit code: $exit_code"
+   fi
+   ```
 
-```bash
-# Build with timing and error capture
-ghost run -i /dev/null -o build_output.log -e build_errors.log -- make build
+3. **Use context for debugging** - include relevant metadata that helps troubleshoot issues:
+   ```bash
+   --context-kv "hostname=$(hostname)" \
+   --context-kv "user=$USER" \
+   --context-kv "pwd=$(pwd)"
+   ```
 
-# Deploy with scoring based on success
-ghost run -i /dev/null -o deploy.log -e deploy_errors.log --score 100 -- ./deploy.sh production
-```
+4. **Set appropriate timeouts** for long-running commands to prevent hanging:
+   ```bash
+   --timeout 5m  # Generous timeout for compilation
+   --timeout 30s # Reasonable timeout for tests
+   ```
 
-### Performance Monitoring
+5. **Use verbose mode during development**, disable in production:
+   ```bash
+   [ "$DEBUG" = "true" ] && VERBOSE_FLAG="-v" || VERBOSE_FLAG=""
+   ghost run -i in.txt -o out.txt -e err.txt $VERBOSE_FLAG -- ./cmd
+   ```
 
-```bash
-# Track execution times for performance analysis
-ghost run -i large_dataset.json -o processed.json -e errors.log -- ./data_processor
-```
+6. **Store webhook credentials securely** using environment variables or secret management:
+   ```bash
+   export GHOST_WEBHOOK_AUTH_TOKEN=$(vault read -field=token secret/webhook)
+   ```
 
-## Diff Command Examples
+7. **Use diff flags for grading** to ignore insignificant differences:
+   ```bash
+   --diff-flags "--ignore-all-space --ignore-blank-lines"
+   ```
 
-### Basic File Comparison
+8. **Batch webhook notifications** to avoid overwhelming endpoints during bulk operations
 
-Compare two files without scoring:
+9. **Test upload configuration** with small files before processing large datasets
 
-```bash
-ghost diff -i actual.txt -x expected.txt -o diff_output.txt -e errors.txt
-```
+10. **Parse JSON output safely** using proper tools like `jq` instead of regex
 
-Output (files are identical):
-```json
-{
-  "command": "diff actual.txt expected.txt",
-  "input": "actual.txt",
-  "expected": "expected.txt",
-  "output": "diff_output.txt",
-  "stderr": "errors.txt",
-  "exit_code": 0,
-  "execution_time": 5
-}
-```
+## See Also
 
-Output (files differ):
-```json
-{
-  "command": "diff actual.txt expected.txt",
-  "input": "actual.txt",
-  "expected": "expected.txt",
-  "output": "diff_output.txt",
-  "stderr": "errors.txt",
-  "exit_code": 1,
-  "execution_time": 7
-}
-```
-
-### File Comparison with Scoring
-
-Compare files with score (100 if match, 0 if different):
-
-```bash
-ghost diff -i student_output.txt -x solution.txt -o comparison.txt -e errors.txt --score 100
-```
-
-### File Comparison with Context
-
-Track metadata for diff operations:
-
-```bash
-ghost diff -i actual.txt -x expected.txt -o diff.txt -e errors.txt \
-  --context-kv "test_case=5" \
-  --context-kv "suite=integration" \
-  --context-kv "module=auth" \
-  --score 100
-```
-
-### Test Output Validation
-
-```bash
-# Compare test output with expected result
-ghost diff -i test_output.txt -x expected_output.txt -o test_diff.txt -e errors.txt --score 100
-
-# Check multiple test outputs
-for test in tests/*.out; do
-  expected="expected/$(basename $test)"
-  diff_file="diffs/$(basename $test .out).diff"
-  error_file="diffs/$(basename $test .out).err"
-  ghost diff -i "$test" -x "$expected" -o "$diff_file" -e "$error_file" --score 100
-done
-```
-
-### CI/CD Usage
-
-```bash
-# Verify configuration file matches template
-ghost diff -i config.yml -x config.template.yml -o config_diff.txt -e config_errors.txt
-
-# Compare build artifacts
-ghost diff -i build/output.js -x reference/output.js -o build_diff.txt -e build_errors.txt --score 100
-```
-
-### Using Diff Flags
-
-The `--diff-flags` option allows you to pass additional flags to the underlying diff command. This is particularly useful for grading scenarios where you want to ignore certain types of differences.
-
-#### Common Grading Flags
-
-- `--ignore-trailing-space` or `-Z`: Ignore white space at line end
-- `--ignore-space-change` or `-b`: Ignore changes in the amount of white space
-- `--ignore-all-space` or `-w`: Ignore all white space
-- `--ignore-blank-lines` or `-B`: Ignore changes where lines are all blank
-
-#### Examples with Diff Flags
-
-Ignore trailing whitespace when comparing:
-```bash
-ghost diff -i student_output.txt -x solution.txt -o diff.txt -e errors.txt --diff-flags "--ignore-trailing-space"
-```
-
-Ignore all whitespace differences:
-```bash
-ghost diff -i result.txt -x expected.txt -o diff.txt -e errors.txt --diff-flags "-w" --score 100
-```
-
-Combine multiple flags to ignore both trailing spaces and blank lines:
-```bash
-ghost diff -i submission.txt -x answer.txt -o diff.txt -e errors.txt --diff-flags "--ignore-trailing-space --ignore-blank-lines"
-```
-
-Use short flags for more concise commands:
-```bash
-ghost diff -i output.txt -x expected.txt -o diff.txt -e errors.txt --diff-flags "-b -B" --score 100
-```
-
-#### Grading Example
-
-For automated grading where formatting shouldn't affect scores:
-```bash
-# Ignore all formatting differences (spaces and blank lines)
-ghost diff -i student.txt -x solution.txt -o feedback.txt -e errors.txt \
-  --diff-flags "--ignore-all-space --ignore-blank-lines" \
-  --score 100
-```
-
-This will give full score (100) if the content matches regardless of spacing differences.
-
-### Notes on Diff Output
-
-- The diff output is written to the file specified by `-o`
-- Exit code 0 means files are identical (considering the flags)
-- Exit code 1 means files differ
-- The actual diff content can be found in the output file
-- Score is included only when `--score` flag is used
-- When using `--diff-flags`, the comparison respects those flags
+- [Configuration Reference](CONFIG.md) - Complete list of flags and environment variables
+- [README](README.md) - Quick start guide
+- [Developer Notes](CLAUDE.md) - Implementation details and development guidance
