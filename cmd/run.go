@@ -56,14 +56,14 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	targetArgs := args[1:]
 
 	// Setup upload provider if configured
-	provider, uploadConf, err := helpers.SetupUploadProvider(&runUploadConfig)
+	provider, uploadConf, err := helpers.SetupUploadProvider(&runUploadConfig, runFlags.DryRun)
 	if err != nil {
 		return err
 	}
 
-	// Print upload info in verbose mode
-	if provider != nil && runFlags.Verbose {
-		helpers.PrintUploadInfo(provider, uploadConf, outputFile, stderrFile)
+	// Print upload info in verbose or dry run mode
+	if provider != nil && (runFlags.Verbose || runFlags.DryRun) {
+		helpers.PrintUploadInfo(provider, uploadConf, outputFile, stderrFile, runFlags.DryRun)
 	}
 
 	// Determine actual execution paths
@@ -88,6 +88,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		OutputFile: actualOutputFile,
 		StderrFile: actualStderrFile,
 		Verbose:    runFlags.Verbose,
+		DryRun:     runFlags.DryRun,
 		Timeout:    runFlags.Timeout,
 	}
 
@@ -102,7 +103,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 			actualOutputFile: outputFile,
 			actualStderrFile: stderrFile,
 		}
-		if err := helpers.HandleUploads(provider, files, runFlags.Verbose); err != nil {
+		if err := helpers.HandleUploads(provider, files, runFlags.Verbose, runFlags.DryRun); err != nil {
 			return err
 		}
 	}
@@ -111,6 +112,11 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	ctxData, err := contextparser.BuildContext(runContextConfig.JSON, runContextConfig.KV, runContextConfig.File)
 	if err != nil {
 		return fmt.Errorf("failed to build context: %w", err)
+	}
+
+	// Print context info in dry run mode
+	if runFlags.DryRun && ctxData != nil {
+		helpers.PrintContextInfo(ctxData, true)
 	}
 
 	// Create JSON result using common function
@@ -131,7 +137,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	)
 
 	// Output JSON and send webhook using common function
-	return helpers.OutputJSONAndWebhook(jsonResult, runFlags.Verbose)
+	return helpers.OutputJSONAndWebhook(jsonResult, runFlags.Verbose, runFlags.DryRun)
 }
 
 func init() {

@@ -96,7 +96,7 @@ func ParseWebhookConfig(config *config.WebhookConfig, isRunCommand bool) error {
 }
 
 // outputJSONAndWebhook outputs JSON to stdout and optionally sends to webhook
-func OutputJSONAndWebhook(result *output.Result, verbose bool) error {
+func OutputJSONAndWebhook(result *output.Result, verbose bool, dryRun bool) error {
 	// Determine which webhook config to use based on command
 	var config *webhook.Config
 	var retryConfig *webhook.RetryConfig
@@ -110,8 +110,28 @@ func OutputJSONAndWebhook(result *output.Result, verbose bool) error {
 		retryConfig = runRetryConfig
 	}
 
-	// Send webhook if configured (before outputting to stdout)
-	if config != nil && config.URL != "" {
+	// Handle webhook in dry run or normal mode
+	if dryRun && config != nil && config.URL != "" {
+		// Print webhook info in dry run
+		fmt.Fprintln(os.Stderr, "========================================")
+		fmt.Fprintln(os.Stderr, "Webhook Configuration (DRY RUN)")
+		fmt.Fprintln(os.Stderr, "========================================")
+		fmt.Fprintf(os.Stderr, "URL:            %s\n", config.URL)
+		fmt.Fprintf(os.Stderr, "Method:         %s\n", config.Method)
+		fmt.Fprintf(os.Stderr, "Auth Type:      %s\n", config.AuthType)
+		if config.AuthToken != "" {
+			fmt.Fprintf(os.Stderr, "Auth Token:     ***REDACTED***\n")
+		}
+		fmt.Fprintf(os.Stderr, "Timeout:        %s\n", config.Timeout)
+		if retryConfig != nil {
+			fmt.Fprintf(os.Stderr, "Max Retries:    %d\n", retryConfig.MaxRetries)
+			fmt.Fprintf(os.Stderr, "Initial Delay:  %s\n", retryConfig.InitialDelay)
+		}
+		fmt.Fprintln(os.Stderr, "----------------------------------------")
+		fmt.Fprintln(os.Stderr, "[DRY RUN] Would send webhook to above URL")
+		fmt.Fprintln(os.Stderr, "========================================")
+	} else if !dryRun && config != nil && config.URL != "" {
+		// Send webhook if configured (before outputting to stdout)
 		client := webhook.NewClient(config, retryConfig, verbose)
 
 		if verbose {

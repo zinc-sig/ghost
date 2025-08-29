@@ -20,6 +20,7 @@ type UploadConfig struct {
 // CommonFlags holds commonly used flags across commands
 type CommonFlags struct {
 	Verbose    bool
+	DryRun     bool
 	TimeoutStr string
 	Timeout    time.Duration
 	Score      int

@@ -61,14 +61,14 @@ func diffCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Setup upload provider if configured
-	provider, uploadConf, err := helpers.SetupUploadProvider(&diffUploadConfig)
+	provider, uploadConf, err := helpers.SetupUploadProvider(&diffUploadConfig, diffCommonFlags.DryRun)
 	if err != nil {
 		return err
 	}
 
-	// Print upload info in verbose mode
-	if provider != nil && diffCommonFlags.Verbose {
-		helpers.PrintUploadInfo(provider, uploadConf, diffOutputFile, diffStderrFile)
+	// Print upload info in verbose or dry run mode
+	if provider != nil && (diffCommonFlags.Verbose || diffCommonFlags.DryRun) {
+		helpers.PrintUploadInfo(provider, uploadConf, diffOutputFile, diffStderrFile, diffCommonFlags.DryRun)
 	}
 
 	// Determine actual execution paths
@@ -107,6 +107,7 @@ func diffCommand(cmd *cobra.Command, args []string) error {
 		OutputFile: actualOutputFile,
 		StderrFile: actualStderrFile,
 		Verbose:    diffCommonFlags.Verbose,
+		DryRun:     diffCommonFlags.DryRun,
 		Timeout:    diffCommonFlags.Timeout,
 	}
 
@@ -122,7 +123,7 @@ func diffCommand(cmd *cobra.Command, args []string) error {
 			actualOutputFile: diffOutputFile,
 			actualStderrFile: diffStderrFile,
 		}
-		if err := helpers.HandleUploads(provider, files, diffCommonFlags.Verbose); err != nil {
+		if err := helpers.HandleUploads(provider, files, diffCommonFlags.Verbose, diffCommonFlags.DryRun); err != nil {
 			return err
 		}
 	}
@@ -131,6 +132,11 @@ func diffCommand(cmd *cobra.Command, args []string) error {
 	ctx, err := contextparser.BuildContext(diffContextConfig.JSON, diffContextConfig.KV, diffContextConfig.File)
 	if err != nil {
 		return fmt.Errorf("failed to build context: %w", err)
+	}
+
+	// Print context info in dry run mode
+	if diffCommonFlags.DryRun && ctx != nil {
+		helpers.PrintContextInfo(ctx, true)
 	}
 
 	// Create JSON result for diff command
@@ -151,7 +157,7 @@ func diffCommand(cmd *cobra.Command, args []string) error {
 	)
 
 	// Output JSON and send webhook
-	return helpers.OutputJSONAndWebhook(jsonResult, diffCommonFlags.Verbose)
+	return helpers.OutputJSONAndWebhook(jsonResult, diffCommonFlags.Verbose, diffCommonFlags.DryRun)
 }
 
 func init() {

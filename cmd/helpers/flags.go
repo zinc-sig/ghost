@@ -23,6 +23,7 @@ func SetupUploadFlags(cmd *cobra.Command, cfg *config.UploadConfig) {
 // SetupCommonFlags adds commonly used flags to a command
 func SetupCommonFlags(cmd *cobra.Command, flags *config.CommonFlags) {
 	cmd.Flags().BoolVarP(&flags.Verbose, "verbose", "v", false, "Show command stderr on terminal in addition to file")
+	cmd.Flags().BoolVar(&flags.DryRun, "dry-run", false, "Show what would be executed without running commands")
 	cmd.Flags().StringVarP(&flags.TimeoutStr, "timeout", "t", "", "Timeout duration (e.g., 30s, 2m, 500ms)")
 	cmd.Flags().IntVar(&flags.Score, "score", 0, "Optional score integer (included in output if exit code is 0)")
 }
