@@ -13,12 +13,14 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/zinc-sig/ghost/cmd/config"
+	"github.com/zinc-sig/ghost/cmd/helpers"
 	"github.com/zinc-sig/ghost/internal/output"
 )
 
 // resetWebhookGlobals resets all webhook-related global variables
 func resetWebhookGlobals() {
-	runWebhookConfig = WebhookConfig{
+	runWebhookConfig = config.WebhookConfig{
 		URL:        "",
 		AuthType:   "none",
 		AuthToken:  "",
@@ -26,10 +28,8 @@ func resetWebhookGlobals() {
 		Retries:    3,
 		RetryDelay: "1s",
 	}
-	runWebhookConfigParsed = nil
-	runRetryConfig = nil
 
-	diffWebhookConfig = WebhookConfig{
+	diffWebhookConfig = config.WebhookConfig{
 		URL:        "",
 		AuthType:   "none",
 		AuthToken:  "",
@@ -37,8 +37,9 @@ func resetWebhookGlobals() {
 		Retries:    3,
 		RetryDelay: "1s",
 	}
-	diffWebhookConfigParsed = nil
-	diffRetryConfig = nil
+
+	// Reset the global webhook configs in helpers package
+	helpers.ResetWebhookConfigs()
 
 	// Reset timeout-related variables
 	runFlags.Timeout = 0

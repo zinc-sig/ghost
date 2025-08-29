@@ -68,10 +68,15 @@ func ParseFile(path string) (any, error) {
 
 // ParseEnv parses environment variables with GHOST_CONTEXT prefix
 func ParseEnv() map[string]any {
+	return ParseEnvWithPrefix("GHOST_CONTEXT")
+}
+
+// ParseEnvWithPrefix parses environment variables with a custom prefix
+func ParseEnvWithPrefix(prefix string) map[string]any {
 	context := make(map[string]any)
 
-	// Check for GHOST_CONTEXT JSON string
-	if jsonStr := os.Getenv("GHOST_CONTEXT"); jsonStr != "" {
+	// Check for PREFIX JSON string (e.g., GHOST_CONTEXT or GHOST_UPLOAD_CONFIG)
+	if jsonStr := os.Getenv(prefix); jsonStr != "" {
 		if parsed, err := ParseJSON(jsonStr); err == nil {
 			if m, ok := parsed.(map[string]any); ok {
 				maps.Copy(context, m)
@@ -79,13 +84,14 @@ func ParseEnv() map[string]any {
 		}
 	}
 
-	// Check for GHOST_CONTEXT_* variables
+	// Check for PREFIX_* variables
+	envPrefix := prefix + "_"
 	environ := os.Environ()
 	for _, env := range environ {
-		if strings.HasPrefix(env, "GHOST_CONTEXT_") {
+		if strings.HasPrefix(env, envPrefix) {
 			parts := strings.SplitN(env, "=", 2)
 			if len(parts) == 2 {
-				key := strings.TrimPrefix(parts[0], "GHOST_CONTEXT_")
+				key := strings.TrimPrefix(parts[0], envPrefix)
 				key = strings.ToLower(key)
 				// Apply type inference to env var values
 				_, value, _ := ParseKV(key + "=" + parts[1])
@@ -130,10 +136,15 @@ func MergeContexts(contexts ...any) any {
 
 // BuildContext builds the final context from all sources
 func BuildContext(jsonStr string, kvPairs []string, filePath string) (any, error) {
+	return BuildContextWithPrefix("GHOST_CONTEXT", jsonStr, kvPairs, filePath)
+}
+
+// BuildContextWithPrefix builds context from all sources with a custom environment variable prefix
+func BuildContextWithPrefix(envPrefix, jsonStr string, kvPairs []string, filePath string) (any, error) {
 	var contexts []any
 
 	// 1. Environment variables (lowest priority)
-	if envCtx := ParseEnv(); envCtx != nil {
+	if envCtx := ParseEnvWithPrefix(envPrefix); envCtx != nil {
 		contexts = append(contexts, envCtx)
 	}
 

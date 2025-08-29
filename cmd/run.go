@@ -2,9 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/zinc-sig/ghost/cmd/config"
+	"github.com/zinc-sig/ghost/cmd/helpers"
 	contextparser "github.com/zinc-sig/ghost/internal/context"
 	"github.com/zinc-sig/ghost/internal/runner"
 )
@@ -16,10 +17,10 @@ var (
 	stderrFile string
 
 	// Common flag structures
-	runFlags         CommonFlags
-	runContextConfig ContextConfig
-	runUploadConfig  UploadConfig
-	runWebhookConfig WebhookConfig
+	runFlags         config.CommonFlags
+	runContextConfig config.ContextConfig
+	runUploadConfig  config.UploadConfig
+	runWebhookConfig config.WebhookConfig
 )
 
 var runCmd = &cobra.Command{
@@ -36,38 +37,33 @@ The '--' separator is required to distinguish ghost flags from the target comman
 }
 
 func runCommand(cmd *cobra.Command, args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("no command specified after '--'")
+	// Validate command separator
+	if err := helpers.ValidateCommandSeparator(cmd, args); err != nil {
+		return err
 	}
 
-	dashIndex := cmd.ArgsLenAtDash()
-	if dashIndex == -1 {
-		return fmt.Errorf("command separator '--' is required")
+	// Validate required I/O flags
+	ioFlags := helpers.IOFlags{
+		Input:  inputFile,
+		Output: outputFile,
+		Stderr: stderrFile,
 	}
-
-	// Validate required flags
-	if inputFile == "" {
-		return fmt.Errorf("required flag 'input' not set")
-	}
-	if outputFile == "" {
-		return fmt.Errorf("required flag 'output' not set")
-	}
-	if stderrFile == "" {
-		return fmt.Errorf("required flag 'stderr' not set")
+	if err := helpers.ValidateIOFlags(ioFlags, false); err != nil {
+		return err
 	}
 
 	targetCommand := args[0]
 	targetArgs := args[1:]
 
 	// Setup upload provider if configured
-	provider, uploadConf, err := SetupUploadProvider(&runUploadConfig)
+	provider, uploadConf, err := helpers.SetupUploadProvider(&runUploadConfig)
 	if err != nil {
 		return err
 	}
 
 	// Print upload info in verbose mode
 	if provider != nil && runFlags.Verbose {
-		PrintUploadInfo(provider, uploadConf, outputFile, stderrFile)
+		helpers.PrintUploadInfo(provider, uploadConf, outputFile, stderrFile)
 	}
 
 	// Determine actual execution paths
@@ -76,21 +72,13 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 	if provider != nil {
 		// Create temp files for execution when upload is configured
-		tempOut, err := os.CreateTemp("", "ghost-output-*.txt")
+		tempOut, tempErr, cleanup, err := helpers.CreateTempFiles("run")
 		if err != nil {
-			return fmt.Errorf("failed to create temp output file: %w", err)
+			return err
 		}
-		defer func() { _ = os.Remove(tempOut.Name()) }()
-		actualOutputFile = tempOut.Name()
-		_ = tempOut.Close()
-
-		tempErr, err := os.CreateTemp("", "ghost-stderr-*.txt")
-		if err != nil {
-			return fmt.Errorf("failed to create temp stderr file: %w", err)
-		}
-		defer func() { _ = os.Remove(tempErr.Name()) }()
-		actualStderrFile = tempErr.Name()
-		_ = tempErr.Close()
+		defer cleanup()
+		actualOutputFile = tempOut
+		actualStderrFile = tempErr
 	}
 
 	config := &runner.Config{
@@ -114,7 +102,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 			actualOutputFile: outputFile,
 			actualStderrFile: stderrFile,
 		}
-		if err := HandleUploads(provider, files, runFlags.Verbose); err != nil {
+		if err := helpers.HandleUploads(provider, files, runFlags.Verbose); err != nil {
 			return err
 		}
 	}
@@ -130,10 +118,11 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	if runFlags.Timeout > 0 {
 		timeoutMs = runFlags.Timeout.Milliseconds()
 	}
-	jsonResult := createJSONResult(
+	jsonResult := helpers.CreateJSONResult(
 		config.InputFile,
 		config.OutputFile,
 		config.StderrFile,
+		"", // No expected file for run command
 		result,
 		timeoutMs,
 		runFlags.ScoreSet,
@@ -142,7 +131,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	)
 
 	// Output JSON and send webhook using common function
-	return outputJSONAndWebhook(jsonResult, runFlags.Verbose)
+	return helpers.OutputJSONAndWebhook(jsonResult, runFlags.Verbose)
 }
 
 func init() {
@@ -157,23 +146,23 @@ func init() {
 	_ = runCmd.MarkFlagRequired("stderr")
 
 	// Setup common flags using helper
-	SetupCommonFlags(runCmd, &runFlags)
-	SetupContextFlags(runCmd, &runContextConfig)
-	SetupUploadFlags(runCmd, &runUploadConfig)
-	SetupWebhookFlags(runCmd, &runWebhookConfig)
+	helpers.SetupCommonFlags(runCmd, &runFlags)
+	helpers.SetupContextFlags(runCmd, &runContextConfig)
+	helpers.SetupUploadFlags(runCmd, &runUploadConfig)
+	helpers.SetupWebhookFlags(runCmd, &runWebhookConfig)
 
 	runCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
 		runFlags.ScoreSet = cmd.Flags().Changed("score")
 
 		// Parse timeout if provided
 		var err error
-		runFlags.Timeout, err = SetupTimeoutPreRun(runFlags.TimeoutStr)
+		runFlags.Timeout, err = helpers.ParseTimeout(runFlags.TimeoutStr)
 		if err != nil {
 			return err
 		}
 
 		// Parse webhook configuration
-		if err := parseWebhookConfig(&runWebhookConfig); err != nil {
+		if err := helpers.ParseWebhookConfig(&runWebhookConfig, true); err != nil {
 			return err
 		}
 

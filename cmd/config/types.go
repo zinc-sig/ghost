@@ -1,4 +1,4 @@
-package cmd
+package config
 
 import "time"
 
@@ -28,10 +28,17 @@ type CommonFlags struct {
 
 // WebhookConfig holds webhook-related flags
 type WebhookConfig struct {
+	// Direct configuration flags
 	URL        string
+	Method     string // HTTP method (GET, POST, PUT, PATCH, DELETE)
 	AuthType   string
 	AuthToken  string
 	Timeout    string
 	Retries    int
 	RetryDelay string
+
+	// Alternative configuration methods
+	Config     string   // JSON string configuration
+	ConfigKV   []string // Key-value pairs
+	ConfigFile string   // Path to JSON config file
 }
