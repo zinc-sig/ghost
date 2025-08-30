@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"path/filepath"
 	"strconv"
 
@@ -51,8 +52,23 @@ func (m *MinioProvider) Configure(config map[string]any) error {
 		return fmt.Errorf("minio: bucket is required")
 	}
 
+	// Parse endpoint to check for protocol
+	var secure bool
+	u, err := url.Parse(endpoint)
+	if err == nil && (u.Scheme == "http" || u.Scheme == "https") {
+		// Valid URL with HTTP/HTTPS protocol
+		secure = (u.Scheme == "https")
+		endpoint = u.Host
+		// If Host is empty (e.g., "http://"), it's an invalid endpoint
+		if endpoint == "" {
+			return fmt.Errorf("minio: invalid endpoint URL")
+		}
+	} else {
+		// No protocol or not a valid URL - use config/default
+		secure = getBoolValue(config, "secure", true)
+	}
+
 	// Optional configuration with defaults
-	secure := getBoolValue(config, "secure", true)
 	region := getStringValueWithDefault(config, "region", "us-east-1")
 	prefix := getStringValueWithDefault(config, "prefix", "")
 

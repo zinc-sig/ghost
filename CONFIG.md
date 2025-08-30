@@ -80,12 +80,12 @@ Common diff flags for grading:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `GHOST_UPLOAD_CONFIG_ENDPOINT` | MinIO/S3 endpoint | `localhost:9000` |
+| `GHOST_UPLOAD_CONFIG_ENDPOINT` | MinIO/S3 endpoint | `localhost:9000` or `http://localhost:9000` |
 | `GHOST_UPLOAD_CONFIG_ACCESS_KEY` | Access key | `minioadmin` |
 | `GHOST_UPLOAD_CONFIG_SECRET_KEY` | Secret key | `minioadmin` |
 | `GHOST_UPLOAD_CONFIG_BUCKET` | Target bucket | `ghost-results` |
 | `GHOST_UPLOAD_CONFIG_PREFIX` | Path prefix | `tests/` |
-| `GHOST_UPLOAD_CONFIG_USE_SSL` | Enable SSL | `true` |
+| `GHOST_UPLOAD_CONFIG_SECURE` | Enable SSL (ignored if protocol in endpoint) | `true` |
 | `GHOST_UPLOAD_CONFIG_*` | Any other MinIO/S3 option | Various |
 
 ### Webhook Configuration Variables
@@ -139,14 +139,19 @@ ghost run -i input.txt -o output.txt -e stderr.txt \
 ### MinIO/S3 Upload Configuration
 
 Required fields:
-- `endpoint`: MinIO/S3 endpoint (without protocol)
+- `endpoint`: MinIO/S3 endpoint (with or without protocol)
+  - With protocol: `http://localhost:9000` or `https://s3.amazonaws.com`
+  - Without protocol: `localhost:9000` (uses `secure` config or defaults to HTTPS)
 - `access_key`: Access key for authentication
 - `secret_key`: Secret key for authentication
 - `bucket`: Target bucket name
 
 Optional fields:
 - `prefix`: Path prefix for uploaded files
-- `use_ssl`: Enable SSL/TLS (default: true for S3, false for localhost)
+- `secure`: Enable SSL/TLS (default: true)
+  - Automatically set based on protocol if included in endpoint
+  - `http://` sets secure=false, `https://` sets secure=true
+  - Only used when endpoint has no protocol prefix
 - `region`: AWS region (for S3)
 
 #### Output File Upload Syntax
@@ -194,16 +199,35 @@ Examples:
 --upload-files "summary.json:reports/summary.json"
 ```
 
-Example configuration:
+Example configurations:
+
 ```json
+// Using protocol in endpoint (recommended)
 {
-  "endpoint": "s3.amazonaws.com",
+  "endpoint": "https://s3.amazonaws.com",
   "access_key": "AKIAIOSFODNN7EXAMPLE",
   "secret_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
   "bucket": "my-bucket",
   "prefix": "ghost-outputs/",
-  "region": "us-east-1",
-  "use_ssl": true
+  "region": "us-east-1"
+}
+
+// Using explicit secure flag (backward compatible)
+{
+  "endpoint": "localhost:9000",
+  "access_key": "minioadmin",
+  "secret_key": "minioadmin",
+  "bucket": "test-bucket",
+  "secure": false
+}
+
+// Protocol in URL overrides secure flag
+{
+  "endpoint": "http://minio.local:9000",
+  "access_key": "admin",
+  "secret_key": "password",
+  "bucket": "uploads",
+  "secure": true  // Ignored - http:// forces secure=false
 }
 ```
 
@@ -302,7 +326,7 @@ export GHOST_UPLOAD_CONFIG_ACCESS_KEY=myaccesskey
 export GHOST_UPLOAD_CONFIG_SECRET_KEY=mysecretkey
 export GHOST_UPLOAD_CONFIG_BUCKET=results
 export GHOST_UPLOAD_CONFIG_PREFIX=ci-builds/
-export GHOST_UPLOAD_CONFIG_USE_SSL=true
+export GHOST_UPLOAD_CONFIG_SECURE=true
 
 # Run with upload enabled
 ghost run -i test.txt -o output.txt -e stderr.txt \
