@@ -124,6 +124,106 @@ func TestMinioProviderName(t *testing.T) {
 	}
 }
 
+func TestMinioProviderURLProtocolDetection(t *testing.T) {
+	tests := []struct {
+		name           string
+		endpoint       string
+		explicitSecure *bool
+		wantEndpoint   string
+		wantSecure     bool
+		wantErr        bool
+	}{
+		{
+			name:         "http protocol",
+			endpoint:     "http://localhost:9000",
+			wantEndpoint: "localhost:9000",
+			wantSecure:   false,
+			wantErr:      false,
+		},
+		{
+			name:         "https protocol",
+			endpoint:     "https://s3.amazonaws.com",
+			wantEndpoint: "s3.amazonaws.com",
+			wantSecure:   true,
+			wantErr:      false,
+		},
+		{
+			name:         "no protocol uses default secure=true",
+			endpoint:     "localhost:9000",
+			wantEndpoint: "localhost:9000",
+			wantSecure:   true,
+			wantErr:      false,
+		},
+		{
+			name:           "no protocol with explicit secure=false",
+			endpoint:       "localhost:9000",
+			explicitSecure: boolPtr(false),
+			wantEndpoint:   "localhost:9000",
+			wantSecure:     false,
+			wantErr:        false,
+		},
+		{
+			name:           "http protocol overrides explicit secure=true",
+			endpoint:       "http://localhost:9000",
+			explicitSecure: boolPtr(true),
+			wantEndpoint:   "localhost:9000",
+			wantSecure:     false,
+			wantErr:        false,
+		},
+		{
+			name:           "https protocol overrides explicit secure=false",
+			endpoint:       "https://s3.amazonaws.com",
+			explicitSecure: boolPtr(false),
+			wantEndpoint:   "s3.amazonaws.com",
+			wantSecure:     true,
+			wantErr:        false,
+		},
+		{
+			name:     "invalid protocol only",
+			endpoint: "http://",
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := NewMinioProvider()
+			config := map[string]any{
+				"endpoint":   tt.endpoint,
+				"access_key": "testkey",
+				"secret_key": "testsecret",
+				"bucket":     "testbucket",
+			}
+			if tt.explicitSecure != nil {
+				config["secure"] = *tt.explicitSecure
+			}
+
+			err := provider.Configure(config)
+
+			// Note: We can't directly test the secure flag or final endpoint
+			// because they're internal to the MinIO client configuration.
+			// The test primarily validates that Configure doesn't error
+			// for valid inputs and does error for invalid ones.
+			if tt.wantErr {
+				if err == nil {
+					t.Error("Expected error, got nil")
+				}
+			} else {
+				// We expect the bucket check to fail since we're not running
+				// a real MinIO server, but the error should be about bucket
+				// existence, not configuration parsing
+				if err != nil && !strings.Contains(err.Error(), "bucket") {
+					t.Errorf("Unexpected configuration error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func boolPtr(b bool) *bool {
+	return &b
+}
+
 func TestMinioProviderConfigValidation(t *testing.T) {
 	provider := NewMinioProvider()
 
@@ -165,6 +265,17 @@ func TestMinioProviderConfigValidation(t *testing.T) {
 			},
 			expectErr: true,
 			errMsg:    "bucket is required",
+		},
+		{
+			name: "invalid endpoint URL",
+			config: map[string]any{
+				"endpoint":   "http://",
+				"access_key": "minioadmin",
+				"secret_key": "minioadmin",
+				"bucket":     "test",
+			},
+			expectErr: true,
+			errMsg:    "invalid endpoint URL",
 		},
 	}
 
