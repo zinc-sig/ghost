@@ -30,10 +30,10 @@ func TestDiffCommand(t *testing.T) {
 	tests := []struct {
 		name            string
 		setupFiles      func(t *testing.T, tmpDir string) (input, expected string)
-		score           int
+		score           string
 		useScore        bool
 		wantExitCode    int
-		wantScore       *int
+		wantScore       *string
 		checkDiffOutput func(t *testing.T, diffOutput string)
 	}{
 		{
@@ -49,9 +49,9 @@ func TestDiffCommand(t *testing.T) {
 				return input, expected
 			},
 			useScore:     true,
-			score:        100,
+			score:        "100",
 			wantExitCode: 0,
-			wantScore:    intPtr(100),
+			wantScore:    stringPtr("100"),
 			checkDiffOutput: func(t *testing.T, diffOutput string) {
 				if diffOutput != "" {
 					t.Errorf("Expected empty diff output for identical files, got: %s", diffOutput)
@@ -70,9 +70,9 @@ func TestDiffCommand(t *testing.T) {
 				return input, expected
 			},
 			useScore:     true,
-			score:        100,
+			score:        "100",
 			wantExitCode: 1,
-			wantScore:    intPtr(0),
+			wantScore:    stringPtr("0"),
 			checkDiffOutput: func(t *testing.T, diffOutput string) {
 				if !strings.Contains(diffOutput, "Line 2") {
 					t.Errorf("Expected diff output to contain 'Line 2', got: %s", diffOutput)
@@ -107,9 +107,9 @@ func TestDiffCommand(t *testing.T) {
 				return input, expected
 			},
 			useScore:     true,
-			score:        50,
+			score:        "50",
 			wantExitCode: 0,
-			wantScore:    intPtr(50),
+			wantScore:    stringPtr("50"),
 		},
 		{
 			name: "one empty one non-empty",
@@ -123,9 +123,9 @@ func TestDiffCommand(t *testing.T) {
 				return input, expected
 			},
 			useScore:     true,
-			score:        75,
+			score:        "75",
 			wantExitCode: 1,
-			wantScore:    intPtr(0),
+			wantScore:    stringPtr("0"),
 			checkDiffOutput: func(t *testing.T, diffOutput string) {
 				if !strings.Contains(diffOutput, "Content") {
 					t.Errorf("Expected diff output to contain 'Content', got: %s", diffOutput)
@@ -168,7 +168,7 @@ func TestDiffCommand(t *testing.T) {
 				Stderr        string  `json:"stderr"`
 				ExitCode      int     `json:"exit_code"`
 				ExecutionTime int64   `json:"execution_time"`
-				Score         *int    `json:"score,omitempty"`
+				Score         *string `json:"score,omitempty"`
 			}
 			if err := json.Unmarshal([]byte(output), &result); err != nil {
 				t.Fatalf("Failed to parse JSON output: %v\nOutput: %s", err, output)
@@ -182,13 +182,13 @@ func TestDiffCommand(t *testing.T) {
 			// Check score
 			if tt.wantScore == nil {
 				if result.Score != nil {
-					t.Errorf("Score should be nil, got %d", *result.Score)
+					t.Errorf("Score should be nil, got %s", *result.Score)
 				}
 			} else {
 				if result.Score == nil {
-					t.Errorf("Score should not be nil, expected %d", *tt.wantScore)
+					t.Errorf("Score should not be nil, expected %s", *tt.wantScore)
 				} else if *result.Score != *tt.wantScore {
-					t.Errorf("Score = %d, want %d", *result.Score, *tt.wantScore)
+					t.Errorf("Score = %s, want %s", *result.Score, *tt.wantScore)
 				}
 			}
 
@@ -317,9 +317,9 @@ func TestDiffCommandWithFlags(t *testing.T) {
 		setupFiles   func(t *testing.T, tmpDir string) (input, expected string)
 		diffFlags    string
 		wantExitCode int
-		wantScore    *int
+		wantScore    *string
 		useScore     bool
-		score        int
+		score        string
 	}{
 		{
 			name: "ignore trailing space",
@@ -336,8 +336,8 @@ func TestDiffCommandWithFlags(t *testing.T) {
 			diffFlags:    "--ignore-trailing-space",
 			wantExitCode: 0,
 			useScore:     true,
-			score:        100,
-			wantScore:    intPtr(100),
+			score:        "100",
+			wantScore:    stringPtr("100"),
 		},
 		{
 			name: "ignore trailing space short flag",
@@ -368,8 +368,8 @@ func TestDiffCommandWithFlags(t *testing.T) {
 			diffFlags:    "--ignore-space-change",
 			wantExitCode: 0,
 			useScore:     true,
-			score:        100,
-			wantScore:    intPtr(100),
+			score:        "100",
+			wantScore:    stringPtr("100"),
 		},
 		{
 			name: "ignore all space",
@@ -416,8 +416,8 @@ func TestDiffCommandWithFlags(t *testing.T) {
 			diffFlags:    "--ignore-trailing-space --ignore-blank-lines",
 			wantExitCode: 0,
 			useScore:     true,
-			score:        100,
-			wantScore:    intPtr(100),
+			score:        "100",
+			wantScore:    stringPtr("100"),
 		},
 		{
 			name: "short flags combined",
@@ -448,8 +448,8 @@ func TestDiffCommandWithFlags(t *testing.T) {
 			diffFlags:    "--ignore-trailing-space",
 			wantExitCode: 1,
 			useScore:     true,
-			score:        100,
-			wantScore:    intPtr(0),
+			score:        "100",
+			wantScore:    stringPtr("0"),
 		},
 	}
 
@@ -487,7 +487,7 @@ func TestDiffCommandWithFlags(t *testing.T) {
 				Stderr        string  `json:"stderr"`
 				ExitCode      int     `json:"exit_code"`
 				ExecutionTime int64   `json:"execution_time"`
-				Score         *int    `json:"score,omitempty"`
+				Score         *string `json:"score,omitempty"`
 			}
 			if err := json.Unmarshal([]byte(output), &result); err != nil {
 				t.Fatalf("Failed to parse JSON output: %v\nOutput: %s", err, output)
@@ -501,20 +501,20 @@ func TestDiffCommandWithFlags(t *testing.T) {
 			// Check score if applicable
 			if tt.wantScore == nil {
 				if result.Score != nil {
-					t.Errorf("Score should be nil, got %d", *result.Score)
+					t.Errorf("Score should be nil, got %s", *result.Score)
 				}
 			} else {
 				if result.Score == nil {
-					t.Errorf("Score should not be nil, expected %d", *tt.wantScore)
+					t.Errorf("Score should not be nil, expected %s", *tt.wantScore)
 				} else if *result.Score != *tt.wantScore {
-					t.Errorf("Score = %d, want %d", *result.Score, *tt.wantScore)
+					t.Errorf("Score = %s, want %s", *result.Score, *tt.wantScore)
 				}
 			}
 		})
 	}
 }
 
-// Helper function to create int pointer
-func intPtr(i int) *int {
-	return &i
+// Helper function to create string pointer
+func stringPtr(s string) *string {
+	return &s
 }

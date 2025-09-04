@@ -24,7 +24,7 @@ type CommonFlags struct {
 	DryRun     bool
 	TimeoutStr string
 	Timeout    time.Duration
-	Score      int
+	Score      string
 	ScoreSet   bool
 }
 

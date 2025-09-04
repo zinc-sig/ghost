@@ -456,7 +456,7 @@ func TestDiffCommand_WithWebhook(t *testing.T) {
 	}
 
 	// Verify score is included (files match, so score should be 100)
-	if result.Score == nil || *result.Score != 100 {
+	if result.Score == nil || result.Score.String() != "100" {
 		t.Error("Expected score to be 100 for matching files")
 	}
 }

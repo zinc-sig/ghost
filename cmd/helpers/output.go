@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/shopspring/decimal"
 	"github.com/zinc-sig/ghost/cmd/config"
 	"github.com/zinc-sig/ghost/internal/output"
 	"github.com/zinc-sig/ghost/internal/runner"
@@ -14,7 +15,7 @@ import (
 
 // createJSONResult creates a JSON result from execution results
 // The expectedPath parameter is optional - pass empty string for run command
-func CreateJSONResult(inputPath, outputPath, stderrPath, expectedPath string, result *runner.Result, timeoutMs int64, scoreSet bool, score int, context any) *output.Result {
+func CreateJSONResult(inputPath, outputPath, stderrPath, expectedPath string, result *runner.Result, timeoutMs int64, scoreSet bool, scoreStr string, context any) *output.Result {
 	jsonResult := &output.Result{
 		Command:       result.Command,
 		Status:        string(result.Status),
@@ -36,11 +37,18 @@ func CreateJSONResult(inputPath, outputPath, stderrPath, expectedPath string, re
 		jsonResult.Timeout = &timeoutMs
 	}
 
-	if scoreSet {
+	if scoreSet && scoreStr != "" {
+		// Parse the score string to decimal
+		score, err := decimal.NewFromString(scoreStr)
+		if err != nil {
+			// If parsing fails, treat as invalid and don't include score
+			return jsonResult
+		}
+
 		if result.ExitCode == 0 {
 			jsonResult.Score = &score
 		} else {
-			zero := 0
+			zero := decimal.NewFromInt(0)
 			jsonResult.Score = &zero
 		}
 	}
