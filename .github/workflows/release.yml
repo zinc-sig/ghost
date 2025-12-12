@@ -86,19 +86,29 @@ jobs:
               }
             }
 
-      - name: Build binary
+      - name: Build binaries
         run: |
           mkdir -p dist
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-            -ldflags="-s -w -extldflags '-static' -X main.Version=${{ steps.version.outputs.new_version }}" \
-            -o dist/ghost-linux-amd64
+          
+          # Define architectures to build
+          ARCHITECTURES="amd64 arm64"
+          
+          for ARCH in $ARCHITECTURES; do
+            echo "Building for linux/${ARCH}..."
+            CGO_ENABLED=0 GOOS=linux GOARCH=${ARCH} go build \
+              -ldflags="-s -w -extldflags '-static' -X main.Version=${{ steps.version.outputs.new_version }}" \
+              -o dist/ghost-linux-${ARCH}
+            echo "✅ Built ghost-linux-${ARCH}"
+          done
 
       - name: Create checksums
         run: |
           cd dist
-          sha256sum ghost-linux-amd64 > ghost-linux-amd64.sha256
-          echo "Checksums:"
-          cat ghost-linux-amd64.sha256
+          for binary in ghost-linux-*; do
+            sha256sum "$binary" > "${binary}.sha256"
+            echo "Created checksum for $binary:"
+            cat "${binary}.sha256"
+          done
 
       - name: Create release and upload assets
         uses: actions/github-script@v7
@@ -125,35 +135,27 @@ jobs:
               console.log(`Release created with ID: ${release.id}`)
               console.log(`Release URL: ${release.html_url}`)
               
-              // Upload binary
-              console.log('Uploading binary...')
-              const binaryPath = path.join(process.env.GITHUB_WORKSPACE, 'dist', 'ghost-linux-amd64')
-              const binaryData = await fs.readFile(binaryPath)
+              // Get all files in dist directory
+              const distPath = path.join(process.env.GITHUB_WORKSPACE, 'dist')
+              const files = await fs.readdir(distPath)
               
-              await github.rest.repos.uploadReleaseAsset({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                release_id: release.id,
-                name: 'ghost-linux-amd64',
-                data: binaryData
-              })
+              // Upload all files
+              for (const file of files) {
+                console.log(`Uploading ${file}...`)
+                const filePath = path.join(distPath, file)
+                const fileData = await fs.readFile(filePath)
+                
+                await github.rest.repos.uploadReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: release.id,
+                  name: file,
+                  data: fileData
+                })
+                
+                console.log(`✅ ${file} uploaded successfully`)
+              }
               
-              console.log('Binary uploaded successfully')
-              
-              // Upload checksum
-              console.log('Uploading checksum...')
-              const checksumPath = path.join(process.env.GITHUB_WORKSPACE, 'dist', 'ghost-linux-amd64.sha256')
-              const checksumData = await fs.readFile(checksumPath)
-              
-              await github.rest.repos.uploadReleaseAsset({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                release_id: release.id,
-                name: 'ghost-linux-amd64.sha256',
-                data: checksumData
-              })
-              
-              console.log('Checksum uploaded successfully')
               console.log(`✅ Release ${newVersion} created successfully!`)
               
             } catch (error) {
