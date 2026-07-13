@@ -132,3 +132,42 @@ func TestWriteHeartbeatCreatesParentDirs(t *testing.T) {
 		t.Errorf("heartbeat content %q is not a unix timestamp: %v", data, err)
 	}
 }
+
+// writeHeartbeat must create the file owner-only (0600), not world-writable.
+func TestWriteHeartbeatPermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".heartbeat")
+	if err := writeHeartbeat(path); err != nil {
+		t.Fatalf("writeHeartbeat: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat heartbeat file: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("heartbeat mode = %#o, want 0600", perm)
+	}
+}
+
+// writeHeartbeat must also tighten a PRE-EXISTING broader-mode file it owns:
+// O_CREAT's 0600 only applies on creation, so an existing 0666 .heartbeat is
+// fchmod'd down to 0600 (the sandbox root-owned EPERM case is a tolerated no-op,
+// not reachable in-process here since the test owns its temp file).
+func TestWriteHeartbeatTightensPreexisting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".heartbeat")
+	if err := os.WriteFile(path, []byte("0"), 0o666); err != nil {
+		t.Fatalf("pre-create: %v", err)
+	}
+	if err := os.Chmod(path, 0o666); err != nil {
+		t.Fatalf("pre-chmod: %v", err)
+	}
+	if err := writeHeartbeat(path); err != nil {
+		t.Fatalf("writeHeartbeat: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat heartbeat file: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("heartbeat mode = %#o after tightening a pre-existing 0666 file, want 0600", perm)
+	}
+}

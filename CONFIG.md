@@ -32,6 +32,7 @@ Available **only** on `exec` and `supervise`. Network isolation is the container
 | `--landlock` | Apply Landlock filesystem restrictions only, no namespaces (Linux only) | No | `false` |
 | `--workdir` | Working directory for Landlock read-write rules | No | Current directory |
 | `--max-pids` | Maximum processes for current user via RLIMIT_NPROC (includes ghost itself; 0 = no limit) | No | `0` |
+| `--seccomp-profile-json` | Inline Docker-format seccomp profile JSON (single-sourced from core) compiled to a BPF syscall filter and installed via `seccomp(2)` with TSYNC; empty applies no filter (opt-in, Linux only) | No | `""` (no filter) |
 
 ### Supervise-Only Flags
 

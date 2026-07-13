@@ -85,6 +85,12 @@ func Supervise(config *Config) error {
 			return fmt.Errorf("supervise: %w", err)
 		}
 	}
+	if config.SeccompProfileJSON != "" {
+		// Applied to the parent pre-fork; inherited by the child across fork.
+		if err := sandbox.ApplySeccompFromJSON([]byte(config.SeccompProfileJSON)); err != nil {
+			return fmt.Errorf("supervise: %w", err)
+		}
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	// §12.7: supervise enforces its own timeout as a SIGTERM→delay→SIGKILL
@@ -184,11 +190,14 @@ func exitCodeFor(waitErr error, timedOut bool) int {
 	return -1
 }
 
-// writeTrailer writes the trailer to the result file (primary Docker transport,
-// read directly off the bind mount) and as a single stream frame on ghost's own
-// stdout (for cluster backends that read the exec stream). The frame is emitted
-// unconditionally so it exists the moment a driver reads it; Docker ignores
-// ghost's stdout and reads the result file.
+// writeTrailer writes the trailer two ways. The authoritative, forge-proof
+// channel is the single stream frame on ghost's own stdout: the child's stdout
+// is redirected to the -o file and it never holds a writable fd to ghost's fd 1
+// (the exec-attach hijack), so even a surviving same-UID fork cannot forge it.
+// Core demuxes that stream and reads the frame. The 0600 result file is kept as
+// a transition fallback for drivers that still read the bind mount; a same-UID
+// fork can rewrite that file, which is exactly why the frame is authoritative.
+// The frame is emitted unconditionally so it exists the moment a driver reads it.
 func writeTrailer(resultFile string, t output.Trailer) error {
 	data, err := json.Marshal(t)
 	if err != nil {
@@ -200,7 +209,26 @@ func writeTrailer(resultFile string, t output.Trailer) error {
 		if err := os.MkdirAll(filepath.Dir(resultFile), 0o755); err != nil {
 			return fmt.Errorf("supervise: create result dir for %s: %w", resultFile, err)
 		}
-		if err := os.WriteFile(resultFile, data, 0644); err != nil {
+		// 0600, not 0666: a surviving same-UID child fork can still rewrite this
+		// (the forge-proof channel is the stdout frame core reads), but there is
+		// no reason to leave the at-rest result world/group-writable. Open+fchmod
+		// rather than os.WriteFile so a PRE-EXISTING broader-mode file is tightened
+		// too (O_CREAT's mode applies only on creation). Ownership caveat: see
+		// tightenToOwnerOnly — a root-owned bind-mount file stays as core made it
+		// (EPERM tolerated); when ghost owns the file it is guaranteed 0600.
+		f, err := os.OpenFile(resultFile, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+		if err != nil {
+			return fmt.Errorf("supervise: write result file %s: %w", resultFile, err)
+		}
+		if err := tightenToOwnerOnly(f); err != nil {
+			f.Close()
+			return fmt.Errorf("supervise: write result file %s: %w", resultFile, err)
+		}
+		if _, err := f.Write(data); err != nil {
+			f.Close()
+			return fmt.Errorf("supervise: write result file %s: %w", resultFile, err)
+		}
+		if err := f.Close(); err != nil {
 			return fmt.Errorf("supervise: write result file %s: %w", resultFile, err)
 		}
 	}

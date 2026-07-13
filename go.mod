@@ -3,11 +3,14 @@ module github.com/zinc-sig/ghost
 go 1.24.5
 
 require (
+	github.com/elastic/go-seccomp-bpf v1.6.0
 	github.com/landlock-lsm/go-landlock v0.7.0
 	github.com/minio/minio-go/v7 v7.0.95
 	github.com/shopspring/decimal v1.4.0
 	github.com/spf13/cobra v1.9.1
+	github.com/spf13/pflag v1.0.6
 	go.temporal.io/sdk v1.30.0
+	golang.org/x/net v0.41.0
 	golang.org/x/sys v0.40.0
 )
 
@@ -33,14 +36,12 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/robfig/cron v1.2.0 // indirect
 	github.com/rs/xid v1.6.0 // indirect
-	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
-	github.com/stretchr/testify v1.9.0 // indirect
+	github.com/stretchr/testify v1.10.0 // indirect
 	github.com/tinylib/msgp v1.3.0 // indirect
 	go.temporal.io/api v1.40.0 // indirect
 	golang.org/x/crypto v0.39.0 // indirect
 	golang.org/x/exp v0.0.0-20231127185646-65229373498e // indirect
-	golang.org/x/net v0.41.0 // indirect
 	golang.org/x/sync v0.15.0 // indirect
 	golang.org/x/text v0.26.0 // indirect
 	golang.org/x/time v0.3.0 // indirect

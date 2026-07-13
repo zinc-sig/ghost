@@ -73,6 +73,26 @@ func TestSuperviseHappyPath(t *testing.T) {
 	assertFileContains(t, cfg.OutputFile, "hello\n")
 }
 
+// TestSuperviseFilePermissions locks the 0600 hardening: the result, stdout and
+// stderr files must not be world/group-writable. The forge-proof channel is the
+// stdout frame, but the at-rest artifacts should still be owner-only.
+func TestSuperviseFilePermissions(t *testing.T) {
+	dir := t.TempDir()
+	cfg := superviseConfig(dir, "sh", "-c", "echo hi; echo err 1>&2")
+	if err := Supervise(cfg); err != nil {
+		t.Fatalf("Supervise: %v", err)
+	}
+	for _, path := range []string{cfg.ResultFile, cfg.OutputFile, cfg.StderrFile} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Errorf("%s mode = %#o, want 0600", path, perm)
+		}
+	}
+}
+
 func TestSuperviseExitCode(t *testing.T) {
 	dir := t.TempDir()
 	cfg := superviseConfig(dir, "sh", "-c", "exit 7")
@@ -193,5 +213,33 @@ func TestSuperviseTimeout(t *testing.T) {
 	tr := decodeResultFile(t, cfg.ResultFile)
 	if tr.ExitCode != -1 {
 		t.Errorf("exit_code = %d, want -1 on timeout", tr.ExitCode)
+	}
+}
+
+// TestWriteTrailer_TightensPreexistingResultFile guards the file-perms fix for
+// the supervise result file: writeTrailer now open+fchmods rather than
+// os.WriteFile, so a PRE-EXISTING broader-mode result file (owned by this
+// process) is tightened to 0600 and the trailer is still written correctly.
+func TestWriteTrailer_TightensPreexistingResultFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "result.json")
+	if err := os.WriteFile(path, []byte("stale"), 0o666); err != nil {
+		t.Fatalf("pre-create: %v", err)
+	}
+	if err := os.Chmod(path, 0o666); err != nil {
+		t.Fatalf("pre-chmod: %v", err)
+	}
+	want := output.Trailer{Schema: 1, ExitCode: 7, DurationMs: 42}
+	if err := writeTrailer(path, want); err != nil {
+		t.Fatalf("writeTrailer: %v", err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if perm := fi.Mode().Perm(); perm != 0o600 {
+		t.Errorf("mode = %#o after tightening a pre-existing 0666 result file, want 0600", perm)
+	}
+	if got := decodeResultFile(t, path); got != want {
+		t.Errorf("trailer = %+v, want %+v", got, want)
 	}
 }

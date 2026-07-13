@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -78,5 +79,27 @@ func writeHeartbeat(path string) error {
 		return err
 	}
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
-	return os.WriteFile(path, []byte(ts), 0644)
+	// 0600 for hygiene. Note: a same-UID child can still overwrite this to forge
+	// liveness; authoritative recycling must be corroborated host-side (daemon
+	// container state), so core treats .heartbeat as a hint only.
+	//
+	// Open+fchmod rather than os.WriteFile so a PRE-EXISTING broader-mode
+	// .heartbeat is tightened too (O_CREAT's mode applies only on creation).
+	// OWNERSHIP CAVEAT: fchmod succeeds only on a file ghost owns. The driver
+	// pre-creates /output/.heartbeat root-owned 0666 while ghost runs non-root, so
+	// fchmod returns EPERM there — tolerated as a no-op (tightening a root-owned
+	// file is core's job). When ghost owns the file it is guaranteed 0600.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := f.Chmod(0o600); err != nil && !errors.Is(err, syscall.EPERM) && !errors.Is(err, syscall.ENOSYS) {
+		f.Close()
+		return err
+	}
+	if _, err := f.Write([]byte(ts)); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }

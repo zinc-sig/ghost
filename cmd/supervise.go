@@ -14,12 +14,13 @@ var (
 	superviseOutputFile string
 	superviseStderrFile string
 
-	superviseTimeoutStr     string
-	superviseLandlock       bool
-	superviseWorkdir        string
-	superviseMaxPids        uint64
-	superviseMaxOutputBytes int64
-	superviseResultFile     string
+	superviseTimeoutStr         string
+	superviseLandlock           bool
+	superviseWorkdir            string
+	superviseMaxPids            uint64
+	superviseMaxOutputBytes     int64
+	superviseResultFile         string
+	superviseSeccompProfileJSON string
 )
 
 var superviseCmd = &cobra.Command{
@@ -59,18 +60,19 @@ func superviseCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	config := &runner.Config{
-		Command:        args[0],
-		Args:           args[1:],
-		InputFile:      superviseInputFile,
-		OutputFile:     superviseOutputFile,
-		StderrFile:     superviseStderrFile,
-		Timeout:        timeout,
-		Supervise:      true,
-		Landlock:       superviseLandlock,
-		SandboxWorkDir: superviseWorkdir,
-		MaxPids:        superviseMaxPids,
-		MaxOutputBytes: superviseMaxOutputBytes,
-		ResultFile:     superviseResultFile,
+		Command:            args[0],
+		Args:               args[1:],
+		InputFile:          superviseInputFile,
+		OutputFile:         superviseOutputFile,
+		StderrFile:         superviseStderrFile,
+		Timeout:            timeout,
+		Supervise:          true,
+		Landlock:           superviseLandlock,
+		SandboxWorkDir:     superviseWorkdir,
+		MaxPids:            superviseMaxPids,
+		MaxOutputBytes:     superviseMaxOutputBytes,
+		ResultFile:         superviseResultFile,
+		SeccompProfileJSON: superviseSeccompProfileJSON,
 	}
 
 	return runner.Supervise(config)
@@ -90,6 +92,7 @@ func init() {
 	superviseCmd.Flags().Uint64Var(&superviseMaxPids, "max-pids", 0, "Maximum number of processes for the current user (includes ghost itself; 0 = no limit)")
 	superviseCmd.Flags().Int64Var(&superviseMaxOutputBytes, "max-output-bytes", 1048576, "Total /output byte cap enforced as output is written")
 	superviseCmd.Flags().StringVar(&superviseResultFile, "result-file", "/output/.result", "Path the supervise result trailer is written to")
+	superviseCmd.Flags().StringVar(&superviseSeccompProfileJSON, "seccomp-profile-json", "", "Docker-format seccomp profile JSON applied to the command (inline, single-sourced from core)")
 
 	superviseCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
 		if superviseLandlock && superviseWorkdir == "" {

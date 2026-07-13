@@ -58,6 +58,12 @@ func ExecuteExec(config *Config) error {
 		}
 	}
 
+	if config.SeccompProfileJSON != "" {
+		if err := sandbox.ApplySeccompFromJSON([]byte(config.SeccompProfileJSON)); err != nil {
+			return fmt.Errorf("exec: %w", err)
+		}
+	}
+
 	// Resolve the command path
 	cmdPath, err := exec.LookPath(config.Command)
 	if err != nil {

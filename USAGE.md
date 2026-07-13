@@ -34,7 +34,7 @@ The `--` separator is **required** to distinguish Ghost flags from the target co
 ghost exec [flags] -- <command> [args...]
 ```
 
-Replaces the ghost process via `execve` after redirecting stdio. There is no JSON output, webhook, or upload — the command's exit status becomes ghost's. `--landlock` applies Landlock filesystem restrictions. Network isolation is the container/cluster's responsibility (egress NetworkPolicy via `NetworkMode`/`NetworkPolicy`), not ghost's. `--workdir` sets the working directory for Landlock read-write rules, and `--max-pids` caps processes via `RLIMIT_NPROC` (includes ghost itself; 0 = no limit).
+Replaces the ghost process via `execve` after redirecting stdio. There is no JSON output, webhook, or upload — the command's exit status becomes ghost's. `--landlock` applies Landlock filesystem restrictions. Network isolation is the container/cluster's responsibility (egress NetworkPolicy via `NetworkMode`/`NetworkPolicy`), not ghost's. `--workdir` sets the working directory for Landlock read-write rules, and `--max-pids` caps processes via `RLIMIT_NPROC` (includes ghost itself; 0 = no limit). `--seccomp-profile-json` takes an inline Docker-format seccomp profile JSON that is compiled to a BPF syscall filter and installed before the command runs (empty = no filter; opt-in).
 
 ### Supervise Command
 
@@ -42,7 +42,7 @@ Replaces the ghost process via `execve` after redirecting stdio. There is no JSO
 ghost supervise [flags] -- <command> [args...]
 ```
 
-Forks the command and keeps ghost alive to measure it (peak memory, OOM attribution, output-size cap), then writes a result trailer to `--result-file` and as a stream frame on stdout. ghost survives the child. It shares `--landlock`, `--workdir`, and `--max-pids` with `exec`, and adds `--max-output-bytes`, `--result-file`, and `--timeout` (which `exec` does not have — exec replaces the process via `execve`, so it cannot enforce a deadline). Network isolation is the container/cluster's responsibility (egress NetworkPolicy), not ghost's. See [Supervise Mode](#supervise-mode).
+Forks the command and keeps ghost alive to measure it (peak memory, OOM attribution, output-size cap), then writes a result trailer to `--result-file` and as a stream frame on stdout. ghost survives the child. It shares `--landlock`, `--workdir`, `--max-pids`, and `--seccomp-profile-json` with `exec`, and adds `--max-output-bytes`, `--result-file`, and `--timeout` (which `exec` does not have — exec replaces the process via `execve`, so it cannot enforce a deadline). Network isolation is the container/cluster's responsibility (egress NetworkPolicy), not ghost's. See [Supervise Mode](#supervise-mode).
 
 ### Diff Command
 
@@ -157,9 +157,10 @@ On Linux, when a process dies its parent must call `wait()` to clear it from the
 
 ### Isolation Flags
 
-`exec` and `supervise` expose the `--landlock` filesystem isolation flag (Linux only). Network isolation is the container/cluster's responsibility (egress NetworkPolicy via `NetworkMode`/`NetworkPolicy`), not ghost's.
+`exec` and `supervise` expose the `--landlock` filesystem isolation and `--seccomp-profile-json` syscall-filtering flags (Linux only). Network isolation is the container/cluster's responsibility (egress NetworkPolicy via `NetworkMode`/`NetworkPolicy`), not ghost's.
 
 - `--landlock` — apply Landlock filesystem restrictions (no namespaces). `--workdir` sets the read-write working directory.
+- `--seccomp-profile-json` — apply a seccomp syscall filter. The value is an inline Docker-format seccomp profile JSON (single-sourced from core, never authored by ghost); ghost's pure-Go filter compiles it to a BPF program and installs it via `seccomp(2)` with TSYNC before the command runs, so the command and all descendants inherit it. When empty (the default) no filter is applied — the layer is opt-in.
 
 ```bash
 # Landlock filesystem restrictions only
@@ -219,13 +220,16 @@ Supervise-specific flags:
 - `--result-file` — where the result trailer JSON is written. Default
   `/output/.result`.
 
-supervise also accepts `--landlock`, `--workdir`, and `--max-pids` (shared with
-`exec`), plus its own `--timeout` (which `exec` lacks). It emits no JSON,
-webhooks, or uploads — only the result trailer (file + stream frame).
+supervise also accepts `--landlock`, `--workdir`, `--max-pids`, and
+`--seccomp-profile-json` (shared with `exec`), plus its own `--timeout` (which
+`exec` lacks). It emits no JSON, webhooks, or uploads — only the result trailer
+(file + stream frame).
 
-**Child isolation.** `--landlock` applies Landlock filesystem restrictions to
-the forked child. Network isolation is the container/cluster's responsibility
-(egress NetworkPolicy via `NetworkMode`/`NetworkPolicy`), not ghost's.
+**Child isolation.** `--landlock` applies Landlock filesystem restrictions and
+`--seccomp-profile-json` installs a seccomp syscall filter; both are applied to
+ghost (the parent) before it forks, so the child inherits them. Network
+isolation is the container/cluster's responsibility (egress NetworkPolicy via
+`NetworkMode`/`NetworkPolicy`), not ghost's.
 
 **Timeout.** When `--timeout` is set, supervise enforces it by sending
 `SIGTERM` to the child's process group, then `SIGKILL` after a grace period. On
@@ -236,10 +240,11 @@ always receives a trailer rather than a broken stream.
 
 The trailer is a single JSON object, written to two destinations:
 
-1. **`--result-file`** (e.g. `/output/.result`) — read directly off the bind
-   mount, no orchestrator API call.
-2. **A framed line on ghost's own stdout** for backends that read the exec
-   stream:
+1. **A framed line on ghost's own stdout** — the authoritative, forge-proof
+   channel. The child's stdout is redirected to `/output/stdout`, so it never
+   holds a writable fd to ghost's fd 1 (the exec-attach stream). Even a
+   surviving same-UID child fork cannot forge this frame. Backends read it by
+   demuxing the exec stream:
 
    ```
    \x1e\x1eZINC-RESULT\x1e<compact-json>\x1e\x1e
@@ -248,6 +253,11 @@ The trailer is a single JSON object, written to two destinations:
    The two RS (`0x1e`) bytes plus the `ZINC-RESULT` token guard against false
    matches in the child's real output (which lives in `/output/{stdout,stderr}`,
    never on this stream).
+2. **`--result-file`** (e.g. `/output/.result`, mode `0600`) — read directly
+   off the bind mount, no orchestrator API call. Kept as a transition fallback:
+   a same-UID child fork can rewrite this file, so consumers should prefer the
+   stdout frame as the authoritative source and treat the file as a fallback
+   only when no frame is present.
 
 Trailer schema (version `1`):
 

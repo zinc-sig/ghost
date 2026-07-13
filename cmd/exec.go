@@ -17,6 +17,8 @@ var (
 	execLandlock bool
 	execWorkdir  string
 	execMaxPids  uint64
+
+	execSeccompProfileJSON string
 )
 
 var execCmd = &cobra.Command{
@@ -51,15 +53,16 @@ func execCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	config := &runner.Config{
-		Command:        args[0],
-		Args:           args[1:],
-		InputFile:      execInputFile,
-		OutputFile:     execOutputFile,
-		StderrFile:     execStderrFile,
-		Exec:           true,
-		Landlock:       execLandlock,
-		SandboxWorkDir: execWorkdir,
-		MaxPids:        execMaxPids,
+		Command:            args[0],
+		Args:               args[1:],
+		InputFile:          execInputFile,
+		OutputFile:         execOutputFile,
+		StderrFile:         execStderrFile,
+		Exec:               true,
+		Landlock:           execLandlock,
+		SandboxWorkDir:     execWorkdir,
+		MaxPids:            execMaxPids,
+		SeccompProfileJSON: execSeccompProfileJSON,
 	}
 
 	return runner.ExecuteExec(config)
@@ -78,6 +81,7 @@ func init() {
 	execCmd.Flags().BoolVar(&execLandlock, "landlock", false, "Apply Landlock filesystem restrictions before execution")
 	execCmd.Flags().StringVar(&execWorkdir, "workdir", "", "Working directory for Landlock read-write rules (defaults to current directory)")
 	execCmd.Flags().Uint64Var(&execMaxPids, "max-pids", 0, "Maximum number of processes for the current user (includes ghost itself; 0 = no limit)")
+	execCmd.Flags().StringVar(&execSeccompProfileJSON, "seccomp-profile-json", "", "Docker-format seccomp profile JSON applied to the command (inline, single-sourced from core)")
 
 	execCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
 		if execLandlock && execWorkdir == "" {

@@ -51,7 +51,7 @@ ghost run -i input.txt -o output.txt -e stderr.txt --timeout 30s -- ./slow-comma
 
 ### Exec a Command
 
-`ghost exec` replaces the ghost process via `execve` after redirecting stdio. There is no JSON output, webhook, or upload — the command's exit status becomes ghost's. The `--landlock` flag applies filesystem isolation. Network isolation is the container/cluster's responsibility (egress NetworkPolicy), not ghost's.
+`ghost exec` replaces the ghost process via `execve` after redirecting stdio. There is no JSON output, webhook, or upload — the command's exit status becomes ghost's. The `--landlock` flag applies filesystem isolation and `--seccomp-profile-json` applies a seccomp syscall filter (an inline Docker-format profile, single-sourced from core; empty = no filter). Network isolation is the container/cluster's responsibility (egress NetworkPolicy), not ghost's.
 
 ```bash
 # Basic exec — zero overhead, no JSON output
@@ -72,9 +72,12 @@ ghost exec --landlock --workdir /workspace --max-pids=33 \
 `ghost supervise` forks the command and keeps ghost alive to measure peak memory, attribute OOM kills, enforce an output-size cap at write time, and emit a result trailer to a result file and as a stream frame on stdout. ghost survives the child. The measurement wrapper for the multi-backend sandbox. See [USAGE.md](USAGE.md#supervise-mode).
 
 ```bash
-# The core sandbox executor backend runs a no-network container, so it uses
-# --landlock only; egress is restricted by the container/cluster
-ghost supervise --landlock --max-pids=33 --max-output-bytes=1048576 \
+# The core sandbox executor backend runs a no-network container, so it relies on
+# --landlock (filesystem) plus --seccomp-profile-json (syscall filtering) for
+# in-container isolation; egress is restricted by the container/cluster.
+# $SECCOMP_JSON holds the inline Docker-format profile core single-sources.
+ghost supervise --landlock --seccomp-profile-json="$SECCOMP_JSON" \
+  --max-pids=33 --max-output-bytes=1048576 \
   --result-file=/output/.result \
   -i /dev/null -o /output/stdout -e /output/stderr -- python3 main.py
 ```
@@ -174,7 +177,7 @@ Ghost outputs structured JSON to stdout:
 - 🔍 **File comparison** - Built-in diff with structured output
 - ⏳ **Timeout support** - Automatic process termination
 - 🔧 **Environment configuration** - Configure via environment variables
-- 🔒 **Isolation** - `--landlock` (filesystem) flag on `exec`/`supervise`; `--sandbox` (Landlock) on legacy `run` (Linux). Network isolation is the container/cluster's responsibility (egress NetworkPolicy), not ghost's
+- 🔒 **Isolation** - `--landlock` (filesystem) and `--seccomp-profile-json` (syscall filtering) flags on `exec`/`supervise`; `--sandbox` (Landlock) on legacy `run` (Linux). Network isolation is the container/cluster's responsibility (egress NetworkPolicy), not ghost's
 - 🛡️ **Process limiting** - RLIMIT_NPROC enforcement to prevent fork bombs (`--max-pids` on `exec`/`supervise`)
 - 🚀 **Exec mode** - Zero-overhead process replacement via `syscall.Exec` (`ghost exec`)
 - 📏 **Supervise mode** - Fork+measure with peak memory, OOM attribution, output cap, and a result trailer (`ghost supervise`)

@@ -448,3 +448,33 @@ func TestExecuteExecModeNonExistentCommand(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+// TestCreateFileWithDir_TightensPreexistingMode guards the file-perms fix:
+// O_CREAT's 0600 only applies on creation, so a PRE-EXISTING broader-mode file
+// (owned by this process) must be fchmod'd down to 0600. The test process owns
+// its temp file, so the fchmod succeeds (the sandbox EPERM path is exercised by
+// the ownership caveat, not reachable in-process here).
+func TestCreateFileWithDir_TightensPreexistingMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "out.txt")
+	// Pre-create world/group-writable and force the mode past any umask.
+	if err := os.WriteFile(path, []byte("stale"), 0o666); err != nil {
+		t.Fatalf("pre-create: %v", err)
+	}
+	if err := os.Chmod(path, 0o666); err != nil {
+		t.Fatalf("pre-chmod: %v", err)
+	}
+	f, err := createFileWithDir(path)
+	if err != nil {
+		t.Fatalf("createFileWithDir: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if perm := fi.Mode().Perm(); perm != 0o600 {
+		t.Errorf("mode = %#o after tightening a pre-existing 0666 file, want 0600", perm)
+	}
+}
