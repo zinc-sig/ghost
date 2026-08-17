@@ -2,11 +2,14 @@ package agent
 
 import (
 	"fmt"
+	"math"
 	"os"
+	"runtime"
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
+	"go.uber.org/automaxprocs/maxprocs"
 
 	"github.com/zinc-sig/ghost/internal/agent/contract"
 )
@@ -15,6 +18,45 @@ import (
 // two contract activities until interrupted (SIGTERM/SIGINT drain the
 // worker gracefully).
 func Run(cfg *Config) error {
+	// Pin GOMAXPROCS to the container's cgroup CPU quota (core backend/12
+	// root-cause fix). Grading containers run with a 1-CPU bandwidth quota
+	// while the node has ~16 cores; Go 1.24 sizes GOMAXPROCS from
+	// runtime.NumCPU() (the quota does not lower nproc), so the runtime
+	// carries 16 Ps' worth of scheduling/timer machinery on a sliver of one
+	// CPU shared with CPU-pegging student processes. Under CFS bandwidth
+	// throttling that starves the runtime's TIMER SERVICING: the Temporal
+	// SDK's batched heartbeat-send timer (one wire send per ~48-60s window)
+	// fires late, the send is never attempted inside the server's margin,
+	// and a LIVE container is declared dead.
+	//
+	// The ceil-rounding + floor-of-2 below deliberately REPRODUCES Go
+	// 1.25+'s native container-aware formula, min(NumCPU, max(ceil(quota),
+	// 2)) (runtime/cgroup_linux.go) — GOMAXPROCS=2 for the 1-CPU grading
+	// quota. Upstream floors at 2 on purpose (GC/runtime progress
+	// headroom), and matching it keeps a future `go 1.25+` go.mod bump
+	// behavior-neutral. NOTE the native mechanism is gated on the go.mod
+	// LANGUAGE VERSION, not the toolchain, and an explicit GOMAXPROCS pin
+	// disables its dynamic quota tracking — so this call is NOT redundant
+	// until the go directive moves to 1.25+ AND this is removed together.
+	// A pre-set GOMAXPROCS env var (e.g. baked into a course environment
+	// image) wins over this pin by design; the boot line below exposes the
+	// effective value either way. Failure to detect the quota is non-fatal
+	// — we log and run with the default, exactly as before this fix.
+	if _, err := maxprocs.Set(
+		maxprocs.Logger(func(format string, args ...interface{}) {
+			fmt.Fprintf(os.Stderr, "ghost agent: "+format+"\n", args...)
+		}),
+		maxprocs.RoundQuotaFunc(func(q float64) int { return int(math.Ceil(q)) }),
+		maxprocs.Min(2),
+	); err != nil {
+		fmt.Fprintf(os.Stderr, "ghost agent: maxprocs: %v (continuing with default GOMAXPROCS)\n", err)
+	}
+	// Boot forensics: one line that answers "what was the runtime actually
+	// configured as" for every future run (core backend/12 taught us this
+	// is the first question of any heartbeat investigation).
+	fmt.Fprintf(os.Stderr, "ghost agent: runtime GOMAXPROCS=%d NumCPU=%d\n",
+		runtime.GOMAXPROCS(0), runtime.NumCPU())
+
 	if err := os.MkdirAll(cfg.Workdir, 0o755); err != nil {
 		return fmt.Errorf("agent: failed to create workspace %s: %w", cfg.Workdir, err)
 	}
