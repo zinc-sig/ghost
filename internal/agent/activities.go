@@ -23,8 +23,22 @@ import (
 )
 
 // heartbeatInterval is how often the agent records an activity heartbeat
-// while a child command is running.
-const heartbeatInterval = 10 * time.Second
+// while a child command is running. NOTE the wire reality (core backend/12):
+// the Temporal SDK BATCHES these — the server actually receives one heartbeat
+// per min(0.8×HeartbeatTimeout, 60s) window; this tick only guarantees a
+// fresh heartbeat is queued for every send window. A var, not a const, so
+// the upload-phase heartbeat regression test can shrink it.
+var heartbeatInterval = 10 * time.Second
+
+// heartbeatTickDelayWarn is the tick-servicing delay above which the agent
+// warns about runtime CPU starvation. Normal servicing is µs–ms; delays of
+// seconds mean the Go runtime is not getting CPU onto its timers (the core
+// backend/12 pathology — at its worst this delays the SDK's batched SEND
+// timer past the server's margin and a live container is declared dead).
+// After the HeartbeatTimeout widening those stalls no longer fail runs, so
+// this WARN is the surviving observability for the failure class: it turns
+// every starvation event into a log line instead of silence.
+const heartbeatTickDelayWarn = 3 * time.Second
 
 // Activities implements the two contract activities the agent registers
 // on its per-run task queue.
@@ -196,8 +210,14 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 		return infraFail(fmt.Errorf("failed to spawn command: %w", err))
 	}
 
-	// Heartbeat while the child runs so core's heartbeat timeout can
-	// detect a dead container mid-exec.
+	// Heartbeat while the exec RUNS AND while its captures upload, so core's
+	// heartbeat timeout only ever detects a dead container — never a live
+	// one still doing post-exec work. Stopped via defer (not inline before
+	// the upload phase): a timed-out exec finishes its window with the wire
+	// heartbeat cadence already near its edge, and the kill + capture
+	// copies + three object-store uploads that follow would otherwise run
+	// heartbeat-dark under exactly the starved conditions that delayed the
+	// exec (core backend/12).
 	hbStop := make(chan struct{})
 	var hbWG sync.WaitGroup
 	hbWG.Add(1)
@@ -209,10 +229,28 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 			select {
 			case <-hbStop:
 				return
-			case <-ticker.C:
+			case tick := <-ticker.C:
+				// tick carries the SCHEDULED fire time (the 1.23+ timer
+				// rework backdates the stamp), so time.Since(tick) is this
+				// tick's true servicing delay. Two causes can produce it:
+				// runtime CPU starvation (the backend/12 pathology), or the
+				// previous RecordHeartbeat blocking this goroutine on a slow
+				// wire send (the SDK sends synchronously when no batch
+				// window is open). Both are worth a WARN; don't assume
+				// which from the message alone. During a multi-tick stall
+				// only the oldest buffered tick is delivered, so one WARN
+				// may stand for several skipped windows.
+				if delay := time.Since(tick); delay > heartbeatTickDelayWarn {
+					logger.Warn("heartbeat tick serviced late (runtime CPU starvation or blocked heartbeat send)",
+						"delay", delay.String(), "stage", in.Stage, "scenario", in.ScenarioCode)
+				}
 				activity.RecordHeartbeat(ctx)
 			}
 		}
+	}()
+	defer func() {
+		close(hbStop)
+		hbWG.Wait()
 	}()
 
 	waitCh := make(chan error, 1)
@@ -231,17 +269,14 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 		waitErr = <-waitCh
 	case <-ctx.Done():
 		// Activity cancelled/timed out by core: kill the child and
-		// surface the cancellation as an activity error.
+		// surface the cancellation as an activity error. (The deferred
+		// heartbeat stop runs on return.)
 		timer.Stop()
 		killProcessGroup(cmd)
 		<-waitCh
-		close(hbStop)
-		hbWG.Wait()
 		finish()
 		return contract.ExecResult{}, ctx.Err()
 	}
-	close(hbStop)
-	hbWG.Wait()
 	finish()
 
 	var infraErrs []string
