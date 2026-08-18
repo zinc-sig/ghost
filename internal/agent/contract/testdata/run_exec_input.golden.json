@@ -12,6 +12,7 @@
     "stdin_path": "q_sa.in",
     "stdout_path": "q_sa.out",
     "timeout_ms": 10000,
+    "output_limit_bytes": 67108864,
     "env": {
       "LANG": "C"
     },

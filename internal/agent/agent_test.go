@@ -127,10 +127,13 @@ func newTestConfig(t *testing.T) *Config {
 		Workdir:        t.TempDir(),
 		StagingDir:     t.TempDir(),
 		DefaultTimeout: 30 * time.Second,
-		MaxPids:        0,
-		Sandbox:        false,
-		GhostPath:      ghostBin,
-		AgentVersion:   "test",
+		// The production default cap, so every test exec exercises the
+		// --max-file-bytes plumbing the way real runs do.
+		DefaultOutputLimit: 64 << 20,
+		MaxPids:            0,
+		Sandbox:            false,
+		GhostPath:          ghostBin,
+		AgentVersion:       "test",
 	}
 }
 

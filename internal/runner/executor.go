@@ -39,6 +39,7 @@ type Config struct {
 	MaxPids            uint64
 	SeccompProfileJSON string // Docker-format seccomp profile JSON (inline, single-sourced from core)
 	MaxOutputBytes     int64  // total /output byte cap for supervise mode
+	MaxFileBytes       int64  // per-file write cap (RLIMIT_FSIZE) for exec mode — deliberately per-file, unlike supervise's total budget
 	ResultFile         string // path the supervise trailer is written to
 }
 

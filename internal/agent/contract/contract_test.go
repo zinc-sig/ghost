@@ -45,13 +45,14 @@ func canonicalRunExecInput() RunExecInput {
 		Stage:           "test",
 		ScenarioCode:    "q_sa",
 		Spec: ExecSpec{
-			Command:    "diff",
-			Args:       []string{"--ignore-case", "q_sa.txt", "expected/q_sa.expected"},
-			StdinPath:  strPtr("q_sa.in"),
-			StdoutPath: strPtr("q_sa.out"),
-			TimeoutMs:  10000,
-			Env:        map[string]string{"LANG": "C"},
-			Workdir:    ".",
+			Command:          "diff",
+			Args:             []string{"--ignore-case", "q_sa.txt", "expected/q_sa.expected"},
+			StdinPath:        strPtr("q_sa.in"),
+			StdoutPath:       strPtr("q_sa.out"),
+			TimeoutMs:        10000,
+			OutputLimitBytes: 64 << 20,
+			Env:              map[string]string{"LANG": "C"},
+			Workdir:          ".",
 		},
 		StdioUpload: StdioUploadSpec{
 			Bucket:    "course-1",
@@ -62,16 +63,20 @@ func canonicalRunExecInput() RunExecInput {
 
 func canonicalExecResult() ExecResult {
 	return ExecResult{
-		Command:    "diff",
-		Args:       []string{"--ignore-case", "q_sa.txt", "expected/q_sa.expected"},
-		ExitCode:   intPtr(0),
-		TimedOut:   false,
-		StartedAt:  time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC),
-		EndedAt:    time.Date(2026, 6, 10, 12, 0, 1, 500000000, time.UTC),
-		DurationMs: 1500,
-		StdinURI:   URIFor("course-1", "runs/55/test/q_sa/stdin"),
-		StdoutURI:  URIFor("course-1", "runs/55/test/q_sa/stdout"),
-		StderrURI:  URIFor("course-1", "runs/55/test/q_sa/stderr"),
+		Command:             "diff",
+		Args:                []string{"--ignore-case", "q_sa.txt", "expected/q_sa.expected"},
+		ExitCode:            intPtr(0),
+		TimedOut:            false,
+		OutputLimitExceeded: false,
+		OutputLimitBytes:    64 << 20,
+		StdoutBytes:         512,
+		StderrBytes:         0,
+		StartedAt:           time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC),
+		EndedAt:             time.Date(2026, 6, 10, 12, 0, 1, 500000000, time.UTC),
+		DurationMs:          1500,
+		StdinURI:            URIFor("course-1", "runs/55/test/q_sa/stdin"),
+		StdoutURI:           URIFor("course-1", "runs/55/test/q_sa/stdout"),
+		StderrURI:           URIFor("course-1", "runs/55/test/q_sa/stderr"),
 	}
 }
 

@@ -179,12 +179,25 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 	// command, so the child's exit status IS the command's. The agent
 	// process is never sandboxed (Landlock and RLIMIT_NPROC are
 	// process-wide and irreversible).
+	// Per-file output cap: spec value, else the agent default. Enforced in
+	// the child via RLIMIT_FSIZE (kill-and-flag, like the timeout), applied
+	// independent of a.cfg.Sandbox — the cap is a resource budget, not a
+	// sandbox feature.
+	outputLimit := a.cfg.DefaultOutputLimit
+	if spec.OutputLimitBytes > 0 {
+		outputLimit = spec.OutputLimitBytes
+	}
+	res.OutputLimitBytes = outputLimit
+
 	args := []string{"exec", "-i", stdinPath, "-o", stdoutCapture, "-e", stderrCapture}
 	if a.cfg.Sandbox {
 		args = append(args, "--landlock", "--workdir", a.cfg.Workdir)
 	}
 	if a.cfg.MaxPids > 0 {
 		args = append(args, fmt.Sprintf("--max-pids=%d", a.cfg.MaxPids))
+	}
+	if outputLimit > 0 {
+		args = append(args, fmt.Sprintf("--max-file-bytes=%d", outputLimit))
 	}
 	args = append(args, "--", spec.Command)
 	args = append(args, spec.Args...)
@@ -277,6 +290,13 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 		finish()
 		return contract.ExecResult{}, ctx.Err()
 	}
+	// The direct child has exited, but its process group may not be empty:
+	// a backgrounded descendant, or the survivors of a SIGXFSZ'd writer,
+	// would keep running — writing into the captures we are about to copy
+	// and upload, and lingering into later execs in this container. Kill
+	// the group on EVERY exit path, not just the timeout branch (where
+	// this is a harmless repeat).
+	killProcessGroup(cmd)
 	finish()
 
 	var infraErrs []string
@@ -289,6 +309,12 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 		// NOT an error per the contract.
 		code := cmd.ProcessState.ExitCode()
 		res.ExitCode = &code
+		if ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && ws.Signaled() && ws.Signal() == syscall.SIGXFSZ {
+			// The kernel killed the child for breaching RLIMIT_FSIZE —
+			// the loud half of output-limit detection (the quiet half,
+			// capture size, is adjudicated below).
+			res.OutputLimitExceeded = true
+		}
 	default:
 		// cmd.Wait() returned no ProcessState. As container init (PID 1) this
 		// is the zombie reaper racing cmd.Wait() and winning — Wait4(-1)
@@ -298,9 +324,31 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 		if ws, ok := reaper.WaitChild(cmd.Process.Pid); ok && errors.Is(waitErr, syscall.ECHILD) {
 			code := ws.ExitStatus() // -1 for signal deaths, matching os/exec
 			res.ExitCode = &code
+			if ws.Signaled() && ws.Signal() == syscall.SIGXFSZ {
+				res.OutputLimitExceeded = true
+			}
 		} else {
 			infraErrs = append(infraErrs, fmt.Sprintf("wait failed: %v", waitErr))
 		}
+	}
+
+	// Output-limit adjudication, size layer: flag on capture size even when
+	// the direct child exited normally — a descendant may have taken the
+	// SIGXFSZ (rlimits are inherited), or a handler swallowed the signal and
+	// writes failed with EFBIG. A capture of EXACTLY the limit is flagged
+	// too: rlimit permits growth to the limit and refuses the byte after,
+	// so full-to-the-brim and truncated are indistinguishable — flag loud
+	// and let staff read the captures. (A workdir file a descendant capped
+	// is invisible here; the size bound still held for it, only the FLAG is
+	// stdio-scoped.)
+	if st, err := os.Stat(stdoutCapture); err == nil {
+		res.StdoutBytes = st.Size()
+	}
+	if st, err := os.Stat(stderrCapture); err == nil {
+		res.StderrBytes = st.Size()
+	}
+	if outputLimit > 0 && (res.StdoutBytes >= outputLimit || res.StderrBytes >= outputLimit) {
+		res.OutputLimitExceeded = true
 	}
 
 	// Copy captures to workdir-relative file destinations for later
@@ -319,18 +367,32 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 	// Stream capture to object storage happens unconditionally:
 	// stdout/stderr always (zero-byte objects are fine), stdin iff
 	// provided. Upload failures land on Error but the result still
-	// carries whatever URIs succeeded.
+	// carries whatever URIs succeeded. The shared store is the one
+	// surface the whole run doesn't own, so uploads are bounded by the
+	// output limit even if the RLIMIT_FSIZE chain broke (capForUpload).
 	bucket := in.StdioUpload.Bucket
 	prefix := in.StdioUpload.KeyPrefix
-	if err := a.store.UploadFile(ctx, bucket, prefix+"/stdout", stdoutCapture); err != nil {
-		infraErrs = append(infraErrs, fmt.Sprintf("upload stdout: %v", err))
-	} else {
-		res.StdoutURI = contract.URIFor(bucket, prefix+"/stdout")
-	}
-	if err := a.store.UploadFile(ctx, bucket, prefix+"/stderr", stderrCapture); err != nil {
-		infraErrs = append(infraErrs, fmt.Sprintf("upload stderr: %v", err))
-	} else {
-		res.StderrURI = contract.URIFor(bucket, prefix+"/stderr")
+	for _, s := range []struct {
+		name, capture string
+		size          int64
+		uri           *string
+	}{
+		{"stdout", stdoutCapture, res.StdoutBytes, &res.StdoutURI},
+		{"stderr", stderrCapture, res.StderrBytes, &res.StderrURI},
+	} {
+		path, capped, err := capForUpload(s.capture, s.size, outputLimit)
+		if err != nil {
+			infraErrs = append(infraErrs, fmt.Sprintf("cap %s for upload: %v", s.name, err))
+			continue
+		}
+		if capped {
+			infraErrs = append(infraErrs, fmt.Sprintf("%s capture exceeded the output limit on disk (enforcement gap) — uploaded the first %d bytes", s.name, outputLimit))
+		}
+		if err := a.store.UploadFile(ctx, bucket, prefix+"/"+s.name, path); err != nil {
+			infraErrs = append(infraErrs, fmt.Sprintf("upload %s: %v", s.name, err))
+		} else {
+			*s.uri = contract.URIFor(bucket, prefix+"/"+s.name)
+		}
 	}
 	if stdinProvided {
 		if err := a.store.UploadFile(ctx, bucket, prefix+"/stdin", stdinPath); err != nil {
@@ -423,6 +485,36 @@ func securePathUnder(root, base, rel string) (string, error) {
 		return "", fmt.Errorf("path %q escapes the workspace", rel)
 	}
 	return dest, nil
+}
+
+// capForUpload returns the path to upload for a stdio capture: the capture
+// itself when it is within the output limit, else a truncated sibling copy
+// (first limit bytes, same staging session dir, reclaimed with it). size >
+// limit is unreachable while the child's RLIMIT_FSIZE holds — this is store
+// protection against an enforcement gap (flag plumbing dropped, non-Linux
+// agent), and the caller records the anomaly on the result Error.
+func capForUpload(capturePath string, size, limit int64) (path string, capped bool, err error) {
+	if limit <= 0 || size <= limit {
+		return capturePath, false, nil
+	}
+	src, err := os.Open(capturePath)
+	if err != nil {
+		return "", false, fmt.Errorf("open capture %s: %w", capturePath, err)
+	}
+	defer func() { _ = src.Close() }()
+	cappedPath := capturePath + ".capped"
+	dst, err := os.Create(cappedPath)
+	if err != nil {
+		return "", false, fmt.Errorf("create %s: %w", cappedPath, err)
+	}
+	_, err = io.CopyN(dst, src, limit)
+	if cerr := dst.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("write %s: %w", cappedPath, err)
+	}
+	return cappedPath, true, nil
 }
 
 // copyCapture copies a stdio capture file to a workdir-relative file
