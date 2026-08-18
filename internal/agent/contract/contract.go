@@ -142,9 +142,17 @@ type ExecSpec struct {
 	StdoutPath   *string  `json:"stdout_path,omitempty"`
 	StderrPath   *string  `json:"stderr_path,omitempty"`
 	// TimeoutMs of 0 means the runtime default applies (agent-side).
-	TimeoutMs int64             `json:"timeout_ms"`
-	Env       map[string]string `json:"env,omitempty"`
-	Workdir   string            `json:"workdir"`
+	TimeoutMs int64 `json:"timeout_ms"`
+	// OutputLimitBytes caps every file the command (and its descendants)
+	// writes, PER FILE — stdio captures included — via RLIMIT_FSIZE in the
+	// child; breach kills the writer with SIGXFSZ and the exec is flagged
+	// (ExecResult.OutputLimitExceeded), mirroring the timeout's
+	// kill-and-flag semantics. Deliberately per-file, unlike supervise's
+	// total-budget --max-output-bytes. 0 means the runtime default applies
+	// (agent-side, GHOST_AGENT_DEFAULT_OUTPUT_LIMIT).
+	OutputLimitBytes int64             `json:"output_limit_bytes"`
+	Env              map[string]string `json:"env,omitempty"`
+	Workdir          string            `json:"workdir"`
 }
 
 // ExecResult carries the RFD 0013 exec_result fields the agent can know
@@ -161,6 +169,22 @@ type ExecResult struct {
 	// TimedOut reports that the agent killed the process for exceeding
 	// its timeout (the exec still produces a result, not an error).
 	TimedOut bool `json:"timed_out"`
+	// OutputLimitExceeded reports that the exec hit its per-file output
+	// limit (ExecSpec.OutputLimitBytes / the agent default): either the
+	// kernel killed the direct child with SIGXFSZ, or a stdio capture
+	// reached the limit even though the child exited normally (a
+	// descendant took the signal, or a handler swallowed it and writes
+	// failed with EFBIG). Like TimedOut, a result — not an error.
+	OutputLimitExceeded bool `json:"output_limit_exceeded"`
+	// OutputLimitBytes echoes the per-file limit that was enforced for
+	// this exec (spec value or agent default), so the flag above is
+	// readable without the config at hand. 0 = no limit was enforced.
+	OutputLimitBytes int64 `json:"output_limit_bytes"`
+	// StdoutBytes/StderrBytes are the captured sizes on disk after the
+	// exec (before upload). With OutputLimitExceeded set they show which
+	// stream hit the cap; on normal runs they are grader-facing metadata.
+	StdoutBytes int64 `json:"stdout_bytes"`
+	StderrBytes int64 `json:"stderr_bytes"`
 	// Error is a human-readable infra-level failure (spawn error,
 	// upload failure, ...). '' = none. A non-zero exit is NOT an error.
 	Error      string    `json:"error,omitempty"`

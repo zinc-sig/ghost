@@ -34,6 +34,13 @@ const (
 	// EnvMaxPids is the RLIMIT_NPROC value the child applies before
 	// execve (default 32; 0 disables the limit).
 	EnvMaxPids = "GHOST_AGENT_MAX_PIDS"
+	// EnvDefaultOutputLimit is the per-file output cap (bytes,
+	// RLIMIT_FSIZE in the child) applied when ExecSpec.OutputLimitBytes
+	// is 0. Default 64 MiB. Bake-time tunable per image; 0 disables the
+	// default entirely — an emergency escape only, the platform ships
+	// with the cap on (core backend/12: a 341-byte grader-bomb stored
+	// 997MB of stdout through the uncapped path).
+	EnvDefaultOutputLimit = "GHOST_AGENT_DEFAULT_OUTPUT_LIMIT"
 	// EnvSandbox toggles Landlock filesystem sandboxing of the child
 	// (default true; only disabled in test environments where Landlock
 	// is unavailable).
@@ -78,8 +85,11 @@ type Config struct {
 	// Agent-internal knobs.
 	StagingDir     string
 	DefaultTimeout time.Duration
-	MaxPids        uint64
-	Sandbox        bool
+	// DefaultOutputLimit is the per-file output cap (bytes) applied when
+	// ExecSpec.OutputLimitBytes is 0; 0 disables the default.
+	DefaultOutputLimit int64
+	MaxPids            uint64
+	Sandbox            bool
 
 	// MaxConcurrentExecs bounds how many activities run at once in this
 	// container (worker.Options.MaxConcurrentActivityExecutionSize).
@@ -137,6 +147,16 @@ func LoadConfig() (*Config, error) {
 		cfg.DefaultTimeout = d
 	} else {
 		cfg.DefaultTimeout = 60 * time.Second
+	}
+
+	if v := os.Getenv(EnvDefaultOutputLimit); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n < 0 {
+			return nil, fmt.Errorf("agent: invalid %s %q: want a non-negative byte count", EnvDefaultOutputLimit, v)
+		}
+		cfg.DefaultOutputLimit = n
+	} else {
+		cfg.DefaultOutputLimit = 64 << 20 // 64 MiB
 	}
 
 	if v := os.Getenv(EnvMaxPids); v != "" {

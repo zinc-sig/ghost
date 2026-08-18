@@ -63,3 +63,23 @@ func LandlockAvailable() bool {
 func EnforceMaxPids(maxPids uint64) error {
 	return unix.Setrlimit(unix.RLIMIT_NPROC, &unix.Rlimit{Cur: maxPids, Max: maxPids})
 }
+
+// EnforceMaxFileBytes sets RLIMIT_FSIZE so no single file written by the
+// current process — or any descendant, rlimits are inherited across fork and
+// execve — can grow beyond maxBytes. A write that would extend a file past the
+// limit delivers SIGXFSZ (default action: terminate); a process that ignores
+// the signal gets EFBIG write errors instead, so the size bound holds either
+// way. The limit applies per FILE, not to the process's total output.
+//
+// RLIMIT_CORE is zeroed first: SIGXFSZ's default action is terminate WITH a
+// core dump, and the core file itself must not land in the workdir (it could
+// be gigabytes, and later pipeline stages must never see it).
+func EnforceMaxFileBytes(maxBytes uint64) error {
+	if err := unix.Setrlimit(unix.RLIMIT_CORE, &unix.Rlimit{Cur: 0, Max: 0}); err != nil {
+		return fmt.Errorf("sandbox: setrlimit RLIMIT_CORE: %w", err)
+	}
+	if err := unix.Setrlimit(unix.RLIMIT_FSIZE, &unix.Rlimit{Cur: maxBytes, Max: maxBytes}); err != nil {
+		return fmt.Errorf("sandbox: setrlimit RLIMIT_FSIZE: %w", err)
+	}
+	return nil
+}

@@ -54,6 +54,9 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.DefaultTimeout != 60*time.Second {
 		t.Errorf("DefaultTimeout = %v, want 60s", cfg.DefaultTimeout)
 	}
+	if cfg.DefaultOutputLimit != 64<<20 {
+		t.Errorf("DefaultOutputLimit = %d, want 64 MiB", cfg.DefaultOutputLimit)
+	}
 	if cfg.StagingDir == "" {
 		t.Error("StagingDir must be set")
 	}
@@ -73,6 +76,7 @@ func TestLoadConfigOverrides(t *testing.T) {
 	t.Setenv(EnvMaxPids, "128")
 	t.Setenv(EnvMaxConcurrentExecs, "8")
 	t.Setenv(EnvDefaultTimeout, "5m")
+	t.Setenv(EnvDefaultOutputLimit, "1048576")
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -105,6 +109,35 @@ func TestLoadConfigOverrides(t *testing.T) {
 	}
 	if cfg.DefaultTimeout != 5*time.Minute {
 		t.Errorf("DefaultTimeout = %v, want 5m", cfg.DefaultTimeout)
+	}
+	if cfg.DefaultOutputLimit != 1<<20 {
+		t.Errorf("DefaultOutputLimit = %d, want 1 MiB", cfg.DefaultOutputLimit)
+	}
+}
+
+func TestLoadConfigInvalidOutputLimit(t *testing.T) {
+	setRequiredEnv(t)
+	for _, v := range []string{"-1", "64MB", "x"} {
+		t.Setenv(EnvDefaultOutputLimit, v)
+		if _, err := LoadConfig(); err == nil {
+			t.Errorf("LoadConfig accepted %s=%q, want error", EnvDefaultOutputLimit, v)
+		}
+	}
+}
+
+func TestLoadConfigOutputLimitZeroDisables(t *testing.T) {
+	// The documented emergency escape: 0 disables the default cap entirely
+	// (no --max-file-bytes flag is passed for specs without an explicit
+	// limit). Pin it so a future "0 is invalid" tightening is a deliberate
+	// decision, not an accident.
+	setRequiredEnv(t)
+	t.Setenv(EnvDefaultOutputLimit, "0")
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig rejected %s=0: %v", EnvDefaultOutputLimit, err)
+	}
+	if cfg.DefaultOutputLimit != 0 {
+		t.Errorf("DefaultOutputLimit = %d, want 0 (cap disabled)", cfg.DefaultOutputLimit)
 	}
 }
 
