@@ -30,7 +30,7 @@ const gracefulShutdownDelay = 5 * time.Second
 // Supervise forks the target command, measures it from a live parent (peak
 // memory, OOM attribution, output-size cap), and emits a result trailer to the
 // result file and as a stream frame on ghost's own stdout. Unlike ExecuteExec,
-// ghost is not replaced — it survives the child to measure and report.
+// ghost is not replaced. It survives the child to measure and report.
 func Supervise(config *Config) error {
 	inputFile, err := os.Open(config.InputFile)
 	if err != nil {
@@ -56,7 +56,8 @@ func Supervise(config *Config) error {
 	}
 	budget := newOutputBudget(maxOutput)
 
-	// fork+wait via os/exec (NOT dup3/execve): ghost must survive the child.
+	// Supervise uses fork+wait via os/exec instead of dup3/execve because ghost
+	// must survive the child.
 	var ctx context.Context
 	var cancel context.CancelFunc
 	var cmd *exec.Cmd
@@ -93,8 +94,8 @@ func Supervise(config *Config) error {
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	// §12.7: supervise enforces its own timeout as a SIGTERM→delay→SIGKILL
-	// escalation on the child's process group; core remains the backstop.
+	// §12.7: supervise enforces its own timeout on the child's process group as
+	// a SIGTERM, delay, SIGKILL escalation; core remains the backstop.
 	// cmd.Cancel may only be set when the command was created with a context
 	// (i.e. a timeout was configured).
 	var timedOut atomic.Bool
@@ -167,7 +168,7 @@ func Supervise(config *Config) error {
 
 // exitCodeFor maps the wait result to the trailer exit code: the wait-status
 // exit code on a normal exit; -1 for a timeout or any signalled exit (including
-// an OOM SIGKILL — oom_killed is the authoritative OOM signal, emitted
+// an OOM SIGKILL: oom_killed is the authoritative OOM signal, emitted
 // independently). Matches core's convention.
 func exitCodeFor(waitErr error, timedOut bool) int {
 	if timedOut {
@@ -214,7 +215,7 @@ func writeTrailer(resultFile string, t output.Trailer) error {
 		// no reason to leave the at-rest result world/group-writable. Open+fchmod
 		// rather than os.WriteFile so a PRE-EXISTING broader-mode file is tightened
 		// too (O_CREAT's mode applies only on creation). Ownership caveat: see
-		// tightenToOwnerOnly — a root-owned bind-mount file stays as core made it
+		// tightenToOwnerOnly. A root-owned bind-mount file stays as core made it
 		// (EPERM tolerated); when ghost owns the file it is guaranteed 0600.
 		f, err := os.OpenFile(resultFile, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 		if err != nil {
@@ -249,8 +250,9 @@ func writeTrailer(resultFile string, t output.Trailer) error {
 // per-exec estimate (never an over-report).
 //
 // NOTE: this is the whole-cgroup watermark and includes ghost's own footprint
-// (it shares the child's cgroup) — a per-cgroup peak, matching what core reads.
-// Changing the attribution is a coordinated ghost+core change (frozen contract).
+// (it shares the child's cgroup): the result is a per-cgroup peak, matching
+// what core reads. Changing the attribution is a coordinated ghost+core change
+// (frozen contract).
 func resolvePeak(baseline, watermark, sampled int64) int64 {
 	if watermark > baseline {
 		return watermark

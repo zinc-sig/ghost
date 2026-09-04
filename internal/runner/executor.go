@@ -1,3 +1,8 @@
+// Package runner is ghost's execution engine. It runs a target command with
+// file-backed stdio, records exit status and duration, and provides the three
+// execution modes: run (metered, with JSON output), exec (process replacement
+// via execve), and supervise (a surviving parent that meters the child and
+// writes a result trailer).
 package runner
 
 import (
@@ -39,7 +44,7 @@ type Config struct {
 	MaxPids            uint64
 	SeccompProfileJSON string // Docker-format seccomp profile JSON (inline, single-sourced from core)
 	MaxOutputBytes     int64  // total /output byte cap for supervise mode
-	MaxFileBytes       int64  // per-file write cap (RLIMIT_FSIZE) for exec mode — deliberately per-file, unlike supervise's total budget
+	MaxFileBytes       int64  // per-file write cap (RLIMIT_FSIZE) for exec mode, not a shared total like supervise
 	ResultFile         string // path the supervise trailer is written to
 }
 
@@ -58,7 +63,7 @@ type Result struct {
 // OWNERSHIP CAVEAT: a process may fchmod only a file it owns (absent CAP_FOWNER).
 // In the sandbox the driver's init step pre-creates /output/{stdout,stderr,
 // .heartbeat,.result} as ROOT-owned 0666 while ghost runs as a NON-root uid, so
-// fchmod there returns EPERM — tightening a root-owned file is core's job, not
+// fchmod there returns EPERM. Tightening a root-owned file is core's job, not
 // ghost's. We therefore tolerate EPERM/ENOSYS as a no-op (not a run failure) and
 // surface any other error. When ghost DOES own the file (standalone use, or a
 // re-run over a ghost-created file) the result is guaranteed 0600.
@@ -87,7 +92,7 @@ func createFileWithDir(path string) (*os.File, error) {
 	}
 	// O_CREAT's 0600 only applies on creation, so a PRE-EXISTING file keeps its
 	// old (possibly broader) mode. Tighten it down. Ownership caveat: see
-	// tightenToOwnerOnly — a root-owned bind-mount file stays as core made it.
+	// tightenToOwnerOnly. A root-owned bind-mount file stays as core made it.
 	if err := tightenToOwnerOnly(file); err != nil {
 		file.Close()
 		return nil, err

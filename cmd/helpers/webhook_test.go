@@ -8,8 +8,9 @@ import (
 )
 
 // TestBuildWebhookConfigFlagPrecedence verifies that an explicit direct flag
-// overrides a config value even when the flag's value equals its default — the
-// bug was comparing flag-value-vs-default instead of "was it changed".
+// overrides a config value even when the flag's value equals its default.
+// Comparing the flag's value against its default, instead of checking whether
+// the flag changed, would treat this explicit-but-default-valued case as unset.
 func TestBuildWebhookConfigFlagPrecedence(t *testing.T) {
 	t.Run("explicit default-valued method overrides config", func(t *testing.T) {
 		cfg := &config.WebhookConfig{
@@ -29,7 +30,7 @@ func TestBuildWebhookConfigFlagPrecedence(t *testing.T) {
 	t.Run("unchanged method leaves config value intact", func(t *testing.T) {
 		cfg := &config.WebhookConfig{
 			Config: `{"method":"PUT"}`,
-			Method: DefaultWebhookMethod, // value present but flag NOT changed
+			Method: DefaultWebhookMethod, // value present but flag not changed
 			// Changed is nil/empty
 		}
 		out, err := BuildWebhookConfig(cfg)

@@ -32,8 +32,8 @@ The process handles SIGTERM and SIGINT for graceful shutdown.`,
 }
 
 func init() {
-	heartbeatCmd.Flags().DurationVar(&heartbeatInterval, "interval", 10*time.Second, "interval between heartbeat writes")
-	heartbeatCmd.Flags().StringVar(&heartbeatFile, "file", "/output/.heartbeat", "file to write heartbeat timestamps to")
+	heartbeatCmd.Flags().DurationVar(&heartbeatInterval, "interval", 10*time.Second, "Interval between heartbeat writes")
+	heartbeatCmd.Flags().StringVar(&heartbeatFile, "file", "/output/.heartbeat", "File to write heartbeat timestamps to")
 }
 
 func heartbeatCommand(cmd *cobra.Command, args []string) error {
@@ -87,8 +87,9 @@ func writeHeartbeat(path string) error {
 	// .heartbeat is tightened too (O_CREAT's mode applies only on creation).
 	// OWNERSHIP CAVEAT: fchmod succeeds only on a file ghost owns. The driver
 	// pre-creates /output/.heartbeat root-owned 0666 while ghost runs non-root, so
-	// fchmod returns EPERM there — tolerated as a no-op (tightening a root-owned
-	// file is core's job). When ghost owns the file it is guaranteed 0600.
+	// fchmod returns EPERM there. Ghost treats this as a no-op, because tightening
+	// a root-owned file is core's job. When ghost owns the file it is guaranteed
+	// 0600.
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err

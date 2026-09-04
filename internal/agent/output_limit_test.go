@@ -66,7 +66,7 @@ func TestRunExec_OutputLimitKillsFloodingChild(t *testing.T) {
 
 // TestRunExec_OutputLimitWorkdirFloodDetectedBySignal: the direct child
 // SIGXFSZ-dies flooding a WORKDIR file while both stdio captures stay
-// under the limit — so the capture-size layer cannot fire and detection
+// under the limit, so the capture-size layer cannot fire and detection
 // rests ENTIRELY on the signal branch (the case that layer uniquely
 // covers; without it this run would read as a bare student crash).
 func TestRunExec_OutputLimitWorkdirFloodDetectedBySignal(t *testing.T) {
@@ -94,7 +94,7 @@ func TestRunExec_OutputLimitWorkdirFloodDetectedBySignal(t *testing.T) {
 		t.Errorf("ExitCode = %v, want -1 (signal death)", res.ExitCode)
 	}
 	// The discriminating assertions: both captures are under the limit, so
-	// the size layer provably did NOT produce the flag.
+	// the size layer provably did not produce the flag.
 	if res.StdoutBytes >= limit || res.StderrBytes >= limit {
 		t.Fatalf("captures not under the limit (stdout=%d stderr=%d) — test no longer isolates the signal branch", res.StdoutBytes, res.StderrBytes)
 	}
@@ -105,7 +105,7 @@ func TestRunExec_OutputLimitWorkdirFloodDetectedBySignal(t *testing.T) {
 }
 
 // TestRunExec_OutputLimitGrandchildDetectedBySize: a DESCENDANT takes the
-// SIGXFSZ while the direct child exits 0 — the capture-size layer must
+// SIGXFSZ while the direct child exits 0. The capture-size layer must
 // still flag the exec. This layer is load-bearing, not belt-and-braces.
 func TestRunExec_OutputLimitGrandchildDetectedBySize(t *testing.T) {
 	cfg := newTestConfig(t)
@@ -203,10 +203,10 @@ func TestRunExec_OutputWithinLimitNotFlagged(t *testing.T) {
 	}
 }
 
-// TestRunExec_NormalExitKillsStragglers: a descendant backgrounded past the
-// direct child's exit must be SIGKILLed with the process group before the
-// activity returns — previously only the timeout branch killed the group,
-// so survivors could keep writing captures and linger into later execs.
+// TestRunExec_NormalExitKillsStragglers asserts that a descendant backgrounded
+// past the direct child's exit is killed with the process group before the
+// activity returns. If only the timeout branch killed the group, a survivor
+// could keep writing captures and linger into later execs.
 func TestRunExec_NormalExitKillsStragglers(t *testing.T) {
 	cfg := newTestConfig(t)
 	store := newFakeStore()
@@ -235,7 +235,7 @@ func TestRunExec_NormalExitKillsStragglers(t *testing.T) {
 		t.Fatalf("could not parse straggler pid from stdout %q: %v", data, err)
 	}
 
-	// The sleeper must be dead (ESRCH) or a zombie awaiting init's reap —
+	// The sleeper must be dead (ESRCH) or a zombie awaiting init's reap:
 	// anything still running means the group was not killed.
 	deadline := time.Now().Add(3 * time.Second)
 	for {
@@ -251,7 +251,8 @@ func TestRunExec_NormalExitKillsStragglers(t *testing.T) {
 }
 
 // stragglerIsZombie reports whether pid is a zombie (state Z in
-// /proc/<pid>/stat) — killed, merely unreaped by its new parent yet.
+// /proc/<pid>/stat): the process is killed but not yet reaped by its new
+// parent.
 func stragglerIsZombie(pid int) bool {
 	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {

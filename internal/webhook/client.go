@@ -1,3 +1,5 @@
+// Package webhook delivers the JSON result to a configured HTTP endpoint, with
+// authentication headers and bounded retries.
 package webhook
 
 import (

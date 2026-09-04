@@ -51,7 +51,7 @@ func ExecuteExec(config *Config) error {
 		}
 	}
 
-	// Enforce process limit (independent of sandbox — works with --exec alone)
+	// Enforce process limit (independent of sandbox; works with --exec alone)
 	if config.MaxPids > 0 {
 		if err := sandbox.EnforceMaxPids(config.MaxPids); err != nil {
 			return fmt.Errorf("exec: failed to enforce max pids: %w", err)
@@ -60,7 +60,7 @@ func ExecuteExec(config *Config) error {
 
 	// Enforce the per-file write cap (independent of sandbox, like MaxPids).
 	// Applied pre-execve, and rlimits survive execve and are inherited by
-	// descendants, so the whole process tree is bound — including writes to
+	// descendants, so the whole process tree is bound, including writes to
 	// the capture files already dup3'd above (RLIMIT_FSIZE is checked at
 	// write time, not open time).
 	if config.MaxFileBytes > 0 {

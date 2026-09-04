@@ -18,10 +18,10 @@ func TestApplySandboxEmptyWorkDir(t *testing.T) {
 
 func TestApplySandboxValidWorkDir(t *testing.T) {
 	// On Linux without Landlock support (or in unprivileged environments),
-	// BestEffort degrades gracefully — this should not panic or hard-fail.
+	// BestEffort degrades gracefully. This should not panic or hard-fail.
 	dir := t.TempDir()
 	err := ApplySandbox(dir)
 	// We accept nil (Landlock applied or best-effort no-op) or an error
-	// (kernel too old, etc.) — the test verifies no panic.
+	// (kernel too old, etc.). The test verifies no panic.
 	_ = err
 }

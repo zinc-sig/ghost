@@ -1,10 +1,10 @@
 package contract
 
-// The golden files under testdata/ ARE the frozen wire contract: they
+// The golden files under testdata/ are the frozen wire contract: they
 // are byte-identical copies of the core repo's
 // internal/pipeline/agentcontract/testdata fixtures. If a change here
-// breaks these tests, it breaks the agent protocol — update both repos
-// together and bump ProtocolVersion for anything not strictly
+// breaks these tests, it breaks the agent protocol. Update both repos
+// together and bump ProtocolVersion for anything that is not strictly
 // additive-and-optional. Fixtures are regenerated in the core repo
 // (UPDATE_GOLDEN=1) and copied verbatim.
 

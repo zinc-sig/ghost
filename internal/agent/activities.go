@@ -24,7 +24,7 @@ import (
 
 // heartbeatInterval is how often the agent records an activity heartbeat
 // while a child command is running. NOTE the wire reality (core backend/12):
-// the Temporal SDK BATCHES these — the server actually receives one heartbeat
+// the Temporal SDK BATCHES these. The server actually receives one heartbeat
 // per min(0.8×HeartbeatTimeout, 60s) window; this tick only guarantees a
 // fresh heartbeat is queued for every send window. A var, not a const, so
 // the upload-phase heartbeat regression test can shrink it.
@@ -33,8 +33,8 @@ var heartbeatInterval = 10 * time.Second
 // heartbeatTickDelayWarn is the tick-servicing delay above which the agent
 // warns about runtime CPU starvation. Normal servicing is µs–ms; delays of
 // seconds mean the Go runtime is not getting CPU onto its timers (the core
-// backend/12 pathology — at its worst this delays the SDK's batched SEND
-// timer past the server's margin and a live container is declared dead).
+// backend/12 pathology: at its worst, this delays the SDK's batched SEND
+// timer past the server's margin, and a live container is declared dead).
 // After the HeartbeatTimeout widening those stalls no longer fail runs, so
 // this WARN is the surviving observability for the failure class: it turns
 // every starvation event into a log line instead of silence.
@@ -103,7 +103,7 @@ func (a *Activities) FetchSubmission(ctx context.Context, in contract.FetchSubmi
 // RunExec runs exactly one resolved exec spec in a sandboxed child
 // process (contract: ghost-run-exec). Infra failures inside the exec
 // (spawn errors, upload errors) are reported on the result's Error
-// field, not as activity errors — the exec_result is the contract.
+// field, not as activity errors: the exec_result is the contract.
 func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (contract.ExecResult, error) {
 	if err := checkProtocol(in.ProtocolVersion); err != nil {
 		return contract.ExecResult{}, err
@@ -142,7 +142,7 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 	if err != nil {
 		return infraFail(fmt.Errorf("failed to create staging session dir: %w", err))
 	}
-	// Reclaim the session on return — after the uploads below have read
+	// Reclaim the session on return, after the uploads below have read
 	// the capture files. Staging may hold exam-answer content (a stdin
 	// blob, captured stdout); leaving it for the next exec in the same
 	// run would expose it to same-UID student code under /tmp.
@@ -181,7 +181,7 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 	// process-wide and irreversible).
 	// Per-file output cap: spec value, else the agent default. Enforced in
 	// the child via RLIMIT_FSIZE (kill-and-flag, like the timeout), applied
-	// independent of a.cfg.Sandbox — the cap is a resource budget, not a
+	// independent of a.cfg.Sandbox: the cap is a resource budget, not a
 	// sandbox feature.
 	outputLimit := a.cfg.DefaultOutputLimit
 	if spec.OutputLimitBytes > 0 {
@@ -224,7 +224,7 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 	}
 
 	// Heartbeat while the exec RUNS AND while its captures upload, so core's
-	// heartbeat timeout only ever detects a dead container — never a live
+	// heartbeat timeout only ever detects a dead container, never a live
 	// one still doing post-exec work. Stopped via defer (not inline before
 	// the upload phase): a timed-out exec finishes its window with the wire
 	// heartbeat cadence already near its edge, and the kill + capture
@@ -292,9 +292,9 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 	}
 	// The direct child has exited, but its process group may not be empty:
 	// a backgrounded descendant, or the survivors of a SIGXFSZ'd writer,
-	// would keep running — writing into the captures we are about to copy
+	// would keep running, writing into the captures we are about to copy
 	// and upload, and lingering into later execs in this container. Kill
-	// the group on EVERY exit path, not just the timeout branch (where
+	// the group on every exit path, not just the timeout branch (where
 	// this is a harmless repeat).
 	killProcessGroup(cmd)
 	finish()
@@ -306,18 +306,18 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 		res.ExitCode = &code
 	case cmd.ProcessState != nil:
 		// Includes non-zero exits and signal deaths (-1). A non-zero exit is
-		// NOT an error per the contract.
+		// not an error per the contract.
 		code := cmd.ProcessState.ExitCode()
 		res.ExitCode = &code
 		if ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && ws.Signaled() && ws.Signal() == syscall.SIGXFSZ {
-			// The kernel killed the child for breaching RLIMIT_FSIZE —
+			// The kernel killed the child for breaching RLIMIT_FSIZE: this is
 			// the loud half of output-limit detection (the quiet half,
 			// capture size, is adjudicated below).
 			res.OutputLimitExceeded = true
 		}
 	default:
 		// cmd.Wait() returned no ProcessState. As container init (PID 1) this
-		// is the zombie reaper racing cmd.Wait() and winning — Wait4(-1)
+		// is the zombie reaper racing cmd.Wait() and winning. Wait4(-1)
 		// reaped the child first, so cmd.Wait() saw ECHILD. Recover the real
 		// status the reaper captured rather than mis-reporting a spawn/wait
 		// failure (which would surface as an "error" scenario).
@@ -333,11 +333,11 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 	}
 
 	// Output-limit adjudication, size layer: flag on capture size even when
-	// the direct child exited normally — a descendant may have taken the
+	// the direct child exited normally. A descendant may have taken the
 	// SIGXFSZ (rlimits are inherited), or a handler swallowed the signal and
-	// writes failed with EFBIG. A capture of EXACTLY the limit is flagged
+	// writes failed with EFBIG. A capture of exactly the limit is flagged
 	// too: rlimit permits growth to the limit and refuses the byte after,
-	// so full-to-the-brim and truncated are indistinguishable — flag loud
+	// so full-to-the-brim and truncated are indistinguishable. Flag loud
 	// and let staff read the captures. (A workdir file a descendant capped
 	// is invisible here; the size bound still held for it, only the FLAG is
 	// stdio-scoped.)
@@ -428,7 +428,7 @@ func killProcessGroup(cmd *exec.Cmd) {
 }
 
 // buildChildEnv builds the explicit child environment: the agent's own
-// environment scrubbed of EVERY GHOST_AGENT_* variable (the student
+// environment scrubbed of every GHOST_AGENT_* variable (the student
 // process must never inherit the Temporal/storage credentials), overlaid
 // with the spec's env entries.
 func buildChildEnv(overlay map[string]string) []string {
@@ -490,7 +490,7 @@ func securePathUnder(root, base, rel string) (string, error) {
 // capForUpload returns the path to upload for a stdio capture: the capture
 // itself when it is within the output limit, else a truncated sibling copy
 // (first limit bytes, same staging session dir, reclaimed with it). size >
-// limit is unreachable while the child's RLIMIT_FSIZE holds — this is store
+// limit is unreachable while the child's RLIMIT_FSIZE holds: this is store
 // protection against an enforcement gap (flag plumbing dropped, non-Linux
 // agent), and the caller records the anomaly on the result Error.
 func capForUpload(capturePath string, size, limit int64) (path string, capped bool, err error) {

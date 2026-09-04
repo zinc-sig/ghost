@@ -1,3 +1,6 @@
+// Package cmd defines the ghost command-line interface on Cobra: the run,
+// diff, exec, supervise, agent, and heartbeat subcommands, their flag
+// validation, and the JSON result written to stdout.
 package cmd
 
 import (
@@ -26,7 +29,7 @@ var rootCmd = &cobra.Command{
 	Long: `Ghost is a CLI tool for executing commands while capturing execution metadata.
 It provides structured JSON output with timing information, exit codes, and optional scoring.
 
-Perfect for testing frameworks, CI/CD pipelines, and process automation.`,
+Suitable for testing frameworks, CI/CD pipelines, and process automation.`,
 }
 
 func Execute() {

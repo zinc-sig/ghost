@@ -142,13 +142,17 @@ lint:
     @which staticcheck > /dev/null 2>&1 && staticcheck ./... || echo "staticcheck not found, skipping..."
     go vet ./...
 
+# Check comments and Markdown against WRITING.md (also a CI step)
+comment-lint:
+    @./scripts/comment_lint.sh
+
 # Run go mod tidy
 tidy:
     go mod tidy
     @echo "Dependencies tidied"
 
-# Check code (fmt, vet, test)
-check: fmt vet test
+# Check code (fmt, vet, comment-lint, test)
+check: fmt vet comment-lint test
     @echo "All checks passed!"
 
 # Watch for changes and rebuild (requires entr)

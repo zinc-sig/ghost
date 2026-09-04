@@ -1,10 +1,10 @@
 // Package agent implements ghost's agent mode (RFD 0015): a long-lived
 // Temporal worker inside a grading container that joins a per-run task
 // queue, serves exactly two activities (fetch-submission and run-exec),
-// and runs each command in a sandboxed child process. The agent itself
-// is never sandboxed — Landlock and RLIMIT_NPROC are process-wide and
-// irreversible, so they are applied by the child (`ghost exec`)
-// just before execve.
+// and runs each command in a sandboxed child process. The agent itself is
+// never sandboxed. Landlock and RLIMIT_NPROC are process-wide and
+// irreversible, so the child (`ghost exec`) applies them just before
+// execve.
 package agent
 
 import (
@@ -36,10 +36,11 @@ const (
 	EnvMaxPids = "GHOST_AGENT_MAX_PIDS"
 	// EnvDefaultOutputLimit is the per-file output cap (bytes,
 	// RLIMIT_FSIZE in the child) applied when ExecSpec.OutputLimitBytes
-	// is 0. Default 64 MiB. Bake-time tunable per image; 0 disables the
-	// default entirely — an emergency escape only, the platform ships
-	// with the cap on (core backend/12: a 341-byte grader-bomb stored
-	// 997MB of stdout through the uncapped path).
+	// is 0. Default 64 MiB. Bake-time tunable per image; setting it to 0
+	// disables the default entirely, as an emergency escape hatch. The
+	// platform ships with the cap on because a 341-byte grader-bomb
+	// stored 997MB of stdout through the uncapped path (core
+	// backend/12).
 	EnvDefaultOutputLimit = "GHOST_AGENT_DEFAULT_OUTPUT_LIMIT"
 	// EnvSandbox toggles Landlock filesystem sandboxing of the child
 	// (default true; only disabled in test environments where Landlock
@@ -68,7 +69,8 @@ type Config struct {
 	TemporalAddress   string
 	TemporalNamespace string
 	TaskQueue         string
-	// AuthToken is empty in the trusted-network interim (Phase 8 seam).
+	// AuthToken is empty in the trusted-network interim; it is required
+	// once the per-run-queue token authorizer ships.
 	AuthToken string
 
 	// Object storage (contract).
@@ -181,7 +183,7 @@ func LoadConfig() (*Config, error) {
 	}
 
 	// Staging is agent-owned (stdin materialisation, stdio captures) and
-	// must NOT be world-writable: 0700, never a shared /tmp path the
+	// must not be world-writable: 0700, never a shared /tmp path the
 	// sandboxed student process could scribble over.
 	if dir := os.Getenv(EnvStagingDir); dir != "" {
 		if err := os.MkdirAll(dir, 0o700); err != nil {

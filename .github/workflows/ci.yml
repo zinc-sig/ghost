@@ -67,3 +67,7 @@ jobs:
             gofmt -l .
             exit 1
           fi
+
+      - name: Check writing conventions
+        if: always()
+        run: ./scripts/comment_lint.sh

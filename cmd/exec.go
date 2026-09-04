@@ -26,7 +26,7 @@ var execCmd = &cobra.Command{
 	Use:   "exec [flags] -- <command> [args...]",
 	Short: "Replace the current process with a command under optional isolation",
 	Long: `Execute a command by replacing the ghost process via syscall.Exec after
-redirecting stdin/stdout/stderr. No JSON output, webhooks, or uploads — the
+redirecting stdin/stdout/stderr. No JSON output, webhooks, or uploads: the
 process is replaced and the command's exit status is ghost's.
 
 Landlock filesystem restrictions (--landlock) are applied as needed. Network
@@ -79,14 +79,14 @@ func init() {
 	_ = execCmd.MarkFlagRequired("stderr")
 
 	// No --timeout: exec replaces the process via execve, so no parent survives
-	// to enforce a deadline — use supervise when a timeout is needed.
+	// to enforce a deadline. Use supervise when a timeout is needed.
 	execCmd.Flags().BoolVar(&execLandlock, "landlock", false, "Apply Landlock filesystem restrictions before execution")
 	execCmd.Flags().StringVar(&execWorkdir, "workdir", "", "Working directory for Landlock read-write rules (defaults to current directory)")
 	execCmd.Flags().Uint64Var(&execMaxPids, "max-pids", 0, "Maximum number of processes for the current user (includes ghost itself; 0 = no limit)")
 	// Per-file, unlike supervise's --max-output-bytes total budget: exec
-	// execve's away, so no parent survives to meter a stream — the kernel
-	// (RLIMIT_FSIZE) enforces instead, and RLIMIT_CORE is zeroed so the
-	// SIGXFSZ kill cannot dump core into the workdir.
+	// execve's away, so no parent survives to meter a stream. The kernel
+	// (RLIMIT_FSIZE) enforces the cap instead, and RLIMIT_CORE is zeroed so
+	// the SIGXFSZ kill cannot dump core into the workdir.
 	execCmd.Flags().Int64Var(&execMaxFileBytes, "max-file-bytes", 0, "Cap each file the command (and descendants) writes to this many bytes via RLIMIT_FSIZE; breach kills the writer with SIGXFSZ (0 = no limit)")
 	execCmd.Flags().StringVar(&execSeccompProfileJSON, "seccomp-profile-json", "", "Docker-format seccomp profile JSON applied to the command (inline, single-sourced from core)")
 

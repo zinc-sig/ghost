@@ -65,8 +65,8 @@ func EnforceMaxPids(maxPids uint64) error {
 }
 
 // EnforceMaxFileBytes sets RLIMIT_FSIZE so no single file written by the
-// current process — or any descendant, rlimits are inherited across fork and
-// execve — can grow beyond maxBytes. A write that would extend a file past the
+// current process (or any descendant, since rlimits are inherited across fork
+// and execve) can grow beyond maxBytes. A write that would extend a file past the
 // limit delivers SIGXFSZ (default action: terminate); a process that ignores
 // the signal gets EFBIG write errors instead, so the size bound holds either
 // way. The limit applies per FILE, not to the process's total output.

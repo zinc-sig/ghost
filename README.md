@@ -14,7 +14,7 @@ The name draws inspiration from several playful concepts:
 
 - **Racing Ghost**: Similar to the ghost racers in Mario Kart that record and replay performances, Ghost captures command outputs and redirects them to different locations, creating a "recording" of your command execution.
 
-- **Silent Observer**: Ghost watches your commands execute without interfering—it observes, captures, and reports, like a friendly specter documenting everything that happens during execution.
+- **Silent Observer**: Ghost watches your commands execute without interfering. It observes, captures, and reports, like a friendly specter documenting everything that happens during execution.
 
 In essence, Ghost is your ethereal assistant that seamlessly captures and redirects I/O streams while remaining nearly invisible to the processes it monitors.
 
@@ -51,7 +51,7 @@ ghost run -i input.txt -o output.txt -e stderr.txt --timeout 30s -- ./slow-comma
 
 ### Exec a Command
 
-`ghost exec` replaces the ghost process via `execve` after redirecting stdio. There is no JSON output, webhook, or upload — the command's exit status becomes ghost's. The `--landlock` flag applies filesystem isolation and `--seccomp-profile-json` applies a seccomp syscall filter (an inline Docker-format profile, single-sourced from core; empty = no filter). Network isolation is the container/cluster's responsibility (egress NetworkPolicy), not ghost's.
+`ghost exec` replaces the ghost process via `execve` after redirecting stdio. There is no JSON output, webhook, or upload. The command's exit status becomes ghost's. The `--landlock` flag applies filesystem isolation and `--seccomp-profile-json` applies a seccomp syscall filter (an inline Docker-format profile, single-sourced from core; empty = no filter). Network isolation is the container/cluster's responsibility (egress NetworkPolicy), not ghost's.
 
 ```bash
 # Basic exec — zero overhead, no JSON output

@@ -10,7 +10,7 @@ import (
 
 // cgroup v2 files, read from the cgroupns root. Inside a private cgroup
 // namespace the executor's own subtree appears at /sys/fs/cgroup, scoped to
-// exactly this container — no /proc/<pid>/cgroup path resolution is needed.
+// exactly this container. No /proc/<pid>/cgroup path resolution is needed.
 const (
 	memoryCurrentPath = "/sys/fs/cgroup/memory.current"
 	memoryPeakPath    = "/sys/fs/cgroup/memory.peak"
@@ -47,7 +47,7 @@ func ReadMemoryPeak() (int64, bool) {
 
 // ReadOOMKillCount parses the oom_kill counter from /sys/fs/cgroup/memory.events
 // (cgroup v2). It returns 0 on a missing file or parse failure, which makes a
-// before/after comparison report "no OOM" — the safe default.
+// before/after comparison report "no OOM", the safe default.
 func ReadOOMKillCount() int64 {
 	data, err := os.ReadFile(memoryEventsPath)
 	if err != nil {

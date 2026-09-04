@@ -29,7 +29,7 @@ var superviseCmd = &cobra.Command{
 	Long: `Execute a command in a forked child while measuring it from a live parent
 (peak memory, OOM attribution, output-size cap), then write a result trailer to
 the result file and as a stream frame on stdout. Unlike exec, ghost is not
-replaced — it survives the child to measure and report.
+replaced. It survives the child to measure and report.
 
 Landlock filesystem restrictions (--landlock) are applied as needed. Network
 isolation is the container/cluster's responsibility (egress NetworkPolicy), not

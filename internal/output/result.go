@@ -1,3 +1,6 @@
+// Package output defines the JSON result ghost writes to stdout and the
+// supervise-mode result trailer, including the stream frame that carries the
+// trailer on stdout.
 package output
 
 import (
