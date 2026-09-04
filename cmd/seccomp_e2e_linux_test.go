@@ -26,7 +26,7 @@ const denyLinkProfileJSON = `{
 // defaultDenyProfileJSON mirrors core's real profile shape: default-deny with
 // ENOSYS and a large SCMP_ACT_ALLOW allowlist (exercises the assembler's
 // short-jump invariant and multi-arch dispatch). It declares every arch ghost
-// supports so the test runs on amd64 and arm64 hosts alike — core's production
+// supports so the test runs on amd64 and arm64 hosts alike. Core's production
 // profile is itself multi-arch (SCMP_ARCH_X86_64/X86/X32/AARCH64), and this
 // test stays host-portable to prove the pure-Go default-deny path works
 // end-to-end. Names absent on the running arch are silently skipped by the
@@ -67,9 +67,10 @@ const defaultDenyProfileJSON = `{
 }`
 
 // ghostBinPath holds the path to a freshly built ghost binary, built once per
-// process via buildGhostBin. End-to-end seccomp tests need the real CLI surface
-// (flag parsing → Config → ApplySeccompFromJSON → filter → child inherits),
-// which a unit test cannot reach.
+// process via buildGhostBin. End-to-end seccomp tests need the real CLI
+// surface: flag parsing produces a Config, ApplySeccompFromJSON turns it into
+// a filter, and the child inherits that filter. A unit test cannot reach that
+// surface.
 var (
 	ghostBinOnce sync.Once
 	ghostBinPath string
@@ -148,11 +149,12 @@ func runGhostSupervise(t *testing.T, bin, profileJSON string, args ...string) ([
 }
 
 // TestSeccompEndToEnd_DeniesLinkCreation proves the full path engages seccomp:
-// flag → Config.SeccompProfileJSON → ApplySeccompFromJSON → buildProgram +
-// bpf.Assemble (profile compiled to a BPF program) → loadFilter (prctl
-// PR_SET_NO_NEW_PRIVS + raw seccomp(2) SECCOMP_SET_MODE_FILTER with TSYNC) →
-// child inherits across fork → the symlink syscall is denied. The `ln -sf`
-// inside the supervised child must fail, and the symlink target must NOT exist.
+// the flag sets Config.SeccompProfileJSON, ApplySeccompFromJSON calls
+// buildProgram and bpf.Assemble to compile the profile into a BPF program,
+// loadFilter installs it with prctl PR_SET_NO_NEW_PRIVS and raw seccomp(2)
+// SECCOMP_SET_MODE_FILTER with TSYNC, the child inherits the filter across
+// fork, and the symlink syscall is denied. The `ln -sf` inside the supervised
+// child must fail, and the symlink target must not exist.
 func TestSeccompEndToEnd_DeniesLinkCreation(t *testing.T) {
 	bin := buildGhostBin(t)
 
@@ -165,7 +167,7 @@ func TestSeccompEndToEnd_DeniesLinkCreation(t *testing.T) {
 	// denial returns EPERM, `ln` prints an error, but sh -c '...' exits 0 by
 	// default unless we explicitly propagate. To make the assertion robust
 	// against shell quirks, we check the FILE existence rather than the exit
-	// code — the symlink file must not be created if the syscall was denied.
+	// code: the symlink file must not be created if the syscall was denied.
 	out, err := runGhostSupervise(t, bin, denyLinkProfileJSON,
 		"sh", "-c", "ln -sf /etc/hostname "+linkTarget+" 2>/dev/null; true")
 	if err != nil {
@@ -185,7 +187,7 @@ func TestSeccompEndToEnd_DeniesLinkCreation(t *testing.T) {
 // break legitimate commands: a plain `echo ok > <file>` inside the supervised
 // child must succeed, the file must contain the expected output, and ghost
 // supervise itself must exit 0. This guards against an over-broad filter that
-// would deny everything (e.g. a default-deny misconfiguration) — such a filter
+// would deny everything (e.g. a default-deny misconfiguration). Such a filter
 // would also "deny links" but would be useless for grading.
 func TestSeccompEndToEnd_AllowsNormalCommand(t *testing.T) {
 	bin := buildGhostBin(t)
@@ -209,10 +211,11 @@ func TestSeccompEndToEnd_AllowsNormalCommand(t *testing.T) {
 }
 
 // TestSeccompEndToEnd_NoProfileIsNoOp confirms that when --seccomp-profile-json
-// is NOT passed, ghost supervise runs normally and link creation is allowed.
-// This guards the gating (empty field → ApplySeccompFromJSON not called) and
-// proves the e2e deny test above only fails because of the profile, not because
-// of the host or harness denying links for some other reason.
+// is not passed, ghost supervise runs normally and link creation is allowed.
+// This guards the gating: when the field is empty, ApplySeccompFromJSON is
+// not called. It also proves the e2e deny test above only fails because of the
+// profile, not because of the host or harness denying links for some other
+// reason.
 func TestSeccompEndToEnd_NoProfileIsNoOp(t *testing.T) {
 	bin := buildGhostBin(t)
 
@@ -233,7 +236,7 @@ func TestSeccompEndToEnd_NoProfileIsNoOp(t *testing.T) {
 // TestSeccompEndToEnd_DefaultDenyAllowsNormalCommand proves the pure-Go filter
 // handles core's real profile shape end-to-end: a large default-deny allowlist
 // plus the conditional clone entry. A plain command that reads/writes must
-// succeed under it — this is the strongest proof that the assembler's short-jump
+// succeed under it. This is the strongest proof that the assembler's short-jump
 // invariant holds on a real (~100-entry) allowlist and that the arch dispatch
 // selects the running architecture correctly. A broken filter would ENOSYS a
 // core syscall and the command would die instead of writing its output.
@@ -274,11 +277,12 @@ func TestSeccompEndToEnd_DefaultDenyBlocksUnlistedSyscall(t *testing.T) {
 	}
 	marker := filepath.Join(dir, "marker")
 
-	// `chmod` (the coreutil) invokes the chmod/fchmodat syscall, which is NOT in
-	// defaultDenyProfileJSON's allowlist → ENOSYS → chmod exits nonzero. The
-	// child's own stdout is redirected to the -o file, not ghost's stream, so we
-	// record the outcome in a marker file (open/write ARE allowlisted) and read
-	// that back — the same filesystem-effect pattern the other e2e tests use.
+	// `chmod` (the coreutil) invokes the chmod/fchmodat syscall, which is not in
+	// defaultDenyProfileJSON's allowlist, so it returns ENOSYS and chmod exits
+	// nonzero. The child's own stdout is redirected to the -o file, not ghost's
+	// stream, so the test records the outcome in a marker file (open/write are
+	// allowlisted) and reads that back. This is the same filesystem-effect
+	// pattern the other e2e tests use.
 	out, _ := runGhostSupervise(t, bin, defaultDenyProfileJSON,
 		"sh", "-c", "if chmod 600 "+target+" 2>/dev/null; then echo OK > "+marker+"; else echo BLOCKED > "+marker+"; fi")
 

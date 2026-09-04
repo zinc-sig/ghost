@@ -115,8 +115,8 @@ Common diff flags for grading:
 | `GHOST_CONTEXT_*` | Individual context keys (lowercased) | `GHOST_CONTEXT_USER_ID=123` |
 
 **Type Inference**: Values in `GHOST_CONTEXT_*` variables are automatically converted:
-- Numbers: `"123"` → `123`, `"3.14"` → `3.14`
-- Booleans: `"true"` → `true`, `"false"` → `false`
+- Numbers: `"123"` becomes `123`, `"3.14"` becomes `3.14`
+- Booleans: `"true"` becomes `true`, `"false"` becomes `false`
 - Strings: Everything else remains as strings
 
 ### Upload Configuration Variables

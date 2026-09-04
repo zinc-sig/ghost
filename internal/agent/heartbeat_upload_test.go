@@ -28,7 +28,7 @@ func (s *slowUploadStore) UploadFile(ctx context.Context, bucket, key, path stri
 // fix: heartbeats must keep flowing WHILE the post-exec capture uploads run,
 // not stop when the child exits. Before the fix the heartbeat goroutine was
 // closed before the uploads, so a slow storage backend left the activity
-// heartbeat-dark exactly when the exec had already consumed its window —
+// heartbeat-dark exactly when the exec had already consumed its window,
 // presenting as a spurious server-side heartbeat timeout on a live container.
 //
 // Mechanism: a near-instant exec (so the exec phase contributes ~no ticks)
@@ -66,12 +66,12 @@ func TestRunExec_HeartbeatsThroughUploadPhase(t *testing.T) {
 	}
 
 	// WHY ">= 1", not a tick count: the SDK BATCHES RecordHeartbeat calls
-	// (the exact mechanism backend/12 turned on) — the test env's invoker
+	// (the exact mechanism backend/12 turned on). The test env's invoker
 	// uses the default 30s throttle regardless of worker options, so the
 	// listener observes WIRE SENDS, not ticks: the first tick sends
 	// immediately, every later tick coalesces into a window that outlives
 	// the test. The timing makes one send fully discriminating: the echo
-	// exec finishes in a few ms, far inside the 150ms first tick — so
+	// exec finishes in a few ms, far inside the 150ms first tick, so
 	// WITHOUT the defer fix the ticker goroutine is closed before it ever
 	// fires and the listener sees exactly 0 sends; WITH the fix the first
 	// tick lands ~150ms into the ~1s upload phase and sends. Any recorded

@@ -4,21 +4,21 @@
 // each command is an activity).
 //
 // This file is a duplicated-but-pinned copy of the core repo's
-// internal/pipeline/agentcontract/contract.go (RFD 0015 P3 / D10): the
-// golden JSON fixtures under testdata/ are byte-identical across the two
-// repos and pin the encoding (Temporal's default data converter marshals
-// activity payloads as JSON, so the json tags below ARE the wire
-// format). Editing this file requires the same edit to the core copy and
-// to both repos' testdata goldens — and a ProtocolVersion bump for any
-// change that is not strictly additive-and-optional.
+// internal/pipeline/agentcontract/contract.go (RFD 0015): the golden JSON
+// fixtures under testdata/ are byte-identical across the two repos and pin
+// the encoding (Temporal's default data converter marshals activity
+// payloads as JSON, so the json tags below are the wire format). Editing
+// this file requires the same edit to the core copy, the same update to
+// both repos' testdata goldens, and a ProtocolVersion bump for any change
+// that is not strictly additive-and-optional.
 package contract
 
 import "time"
 
 // ProtocolVersion is carried on every activity input. The agent compares
 // it against its own compiled-in version and fails the activity with a
-// non-retryable ApplicationError of type ProtocolMismatchErrorType on
-// any difference — surfacing "agent too old, rebuild the environment
+// non-retryable ApplicationError of type ProtocolMismatchErrorType on any
+// difference. This surfaces "agent too old, rebuild the environment
 // image" at the readiness handshake instead of a confusing payload
 // decode error mid-run (RFD 0015 Decision 3).
 const ProtocolVersion = 1
@@ -36,31 +36,31 @@ const (
 	// that never connects never starts it), and its result carries the
 	// agent's protocol version for the skew check.
 	FetchSubmissionActivity = "ghost-fetch-submission"
-	// RunExecActivity runs exactly one resolved exec spec — one
-	// (stage, scenario) — per invocation, never a batch (RFD 0015
-	// Decision 1: per-exec command granularity).
+	// RunExecActivity runs exactly one resolved exec spec per invocation,
+	// a single (stage, scenario) pair, never a batch (RFD 0015 Decision
+	// 1: per-exec command granularity).
 	RunExecActivity = "ghost-run-exec"
 )
 
 // Agent boot configuration environment variables, injected by the
 // runner backend at dispatch. The names are part of this contract; the
 // delivery mechanism (plain env vs file vs secret mount) is the v1
-// interim and may be hardened (RFD 0015 Decision 8 / Phase 8) without
-// renaming. The agent must read these at boot and scrub them from the
+// interim and may be hardened (RFD 0015 Decision 8) without renaming.
+// The agent must read these at boot and scrub them from the
 // environment it spawns student commands with.
 const (
 	EnvTemporalAddress   = "GHOST_AGENT_TEMPORAL_ADDRESS"
 	EnvTemporalNamespace = "GHOST_AGENT_TEMPORAL_NAMESPACE"
 	EnvTaskQueue         = "GHOST_AGENT_TASK_QUEUE"
 	// EnvTemporalAuthToken is empty in the trusted-network interim; once
-	// the per-run-queue token authorizer ships (Phase 8) it is required.
+	// the per-run-queue token authorizer ships, it is required.
 	EnvTemporalAuthToken = "GHOST_AGENT_TEMPORAL_AUTH_TOKEN"
 
 	EnvStorageEndpoint  = "GHOST_AGENT_STORAGE_ENDPOINT"
 	EnvStorageAccessKey = "GHOST_AGENT_STORAGE_ACCESS_KEY"
 	EnvStorageSecretKey = "GHOST_AGENT_STORAGE_SECRET_KEY"
-	// EnvStorageSessionToken is empty with static interim credentials;
-	// populated once per-run STS credentials ship (Phase 8).
+	// EnvStorageSessionToken is empty with static interim credentials; it
+	// is populated once per-run STS credentials ship.
 	EnvStorageSessionToken = "GHOST_AGENT_STORAGE_SESSION_TOKEN"
 	EnvStorageSecure       = "GHOST_AGENT_STORAGE_SECURE"
 
@@ -69,8 +69,8 @@ const (
 	EnvWorkdir = "GHOST_AGENT_WORKDIR"
 )
 
-// FetchSubmissionInput asks the agent to download the run's inputs —
-// the student submission and the derived/config assets — into the run
+// FetchSubmissionInput asks the agent to download the run's inputs (the
+// student submission and the derived/config assets) into the run
 // workspace (RFD 0015 Decision 7: the agent fetches its own inputs).
 type FetchSubmissionInput struct {
 	ProtocolVersion int            `json:"protocol_version"`
@@ -101,7 +101,7 @@ type FetchSubmissionResult struct {
 
 // RunExecInput is one resolved exec command. The workflow schedules one
 // per (stage, scenario) on the per-run queue; stage/scenario_code are
-// echoed for the agent's logging/tracing only — the workflow keys the
+// echoed for the agent's logging/tracing only. The workflow keys the
 // result by the activity it scheduled, and dependency gating (skipped)
 // is entirely the workflow's concern.
 type RunExecInput struct {
@@ -132,7 +132,7 @@ type StdioUploadSpec struct {
 //     the effective workdir, for later stages to consume. Stream capture
 //     to object storage happens unconditionally regardless of these.
 //   - Workdir is relative to the run workspace root ("." = root).
-//   - Env is overlaid on the agent's *scrubbed* base environment — the
+//   - Env is overlaid on the agent's *scrubbed* base environment. The
 //     student process must never inherit the GHOST_AGENT_* credentials.
 type ExecSpec struct {
 	Command      string   `json:"command"`
@@ -144,7 +144,7 @@ type ExecSpec struct {
 	// TimeoutMs of 0 means the runtime default applies (agent-side).
 	TimeoutMs int64 `json:"timeout_ms"`
 	// OutputLimitBytes caps every file the command (and its descendants)
-	// writes, PER FILE — stdio captures included — via RLIMIT_FSIZE in the
+	// writes, per file (stdio captures included), via RLIMIT_FSIZE in the
 	// child; breach kills the writer with SIGXFSZ and the exec is flagged
 	// (ExecResult.OutputLimitExceeded), mirroring the timeout's
 	// kill-and-flag semantics. Deliberately per-file, unlike supervise's
@@ -157,8 +157,8 @@ type ExecSpec struct {
 
 // ExecResult carries the RFD 0013 exec_result fields the agent can know
 // on its own. The workflow owns the rest: `skipped` (dependency gating)
-// and the derived per-scenario/stage state. ” on Error/URIs encodes the
-// contract's null, matching the persistence layer.
+// and the derived per-scenario/stage state. The empty string on
+// Error/URIs encodes the contract's null, matching the persistence layer.
 type ExecResult struct {
 	// Command/Args echo the resolved values actually executed.
 	Command string   `json:"command"`
@@ -174,7 +174,8 @@ type ExecResult struct {
 	// kernel killed the direct child with SIGXFSZ, or a stdio capture
 	// reached the limit even though the child exited normally (a
 	// descendant took the signal, or a handler swallowed it and writes
-	// failed with EFBIG). Like TimedOut, a result — not an error.
+	// failed with EFBIG). Like TimedOut, the exec still produces a
+	// result, not an error.
 	OutputLimitExceeded bool `json:"output_limit_exceeded"`
 	// OutputLimitBytes echoes the per-file limit that was enforced for
 	// this exec (spec value or agent default), so the flag above is
@@ -186,21 +187,22 @@ type ExecResult struct {
 	StdoutBytes int64 `json:"stdout_bytes"`
 	StderrBytes int64 `json:"stderr_bytes"`
 	// Error is a human-readable infra-level failure (spawn error,
-	// upload failure, ...). '' = none. A non-zero exit is NOT an error.
+	// upload failure, and so on). The empty string means none. A non-zero
+	// exit is not an error.
 	Error      string    `json:"error,omitempty"`
 	StartedAt  time.Time `json:"started_at"`
 	EndedAt    time.Time `json:"ended_at"`
 	DurationMs int64     `json:"duration_ms"`
 	// Stdio URIs: always populated for stdout/stderr on an executed
 	// command (zero-byte object for empty output); StdinURI populated
-	// iff stdin was provided. '' = not captured.
+	// iff stdin was provided. The empty string means not captured.
 	StdinURI  string `json:"stdin_uri,omitempty"`
 	StdoutURI string `json:"stdout_uri,omitempty"`
 	StderrURI string `json:"stderr_uri,omitempty"`
 }
 
 // URIFor is the frozen stdio-URI format: s3://<bucket>/<key>. The URI is
-// an opaque dereferenceable handle — only core's artifact-serving layer
+// an opaque dereferenceable handle: only core's artifact-serving layer
 // ever parses it back.
 func URIFor(bucket, key string) string {
 	return "s3://" + bucket + "/" + key

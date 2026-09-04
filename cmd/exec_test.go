@@ -7,7 +7,7 @@ import (
 )
 
 // TestExecSuperviseSurface guards the subcommand redesign: exec and supervise
-// expose the --landlock isolation flag and NOT the legacy bundled --sandbox
+// expose the --landlock isolation flag and not the legacy bundled --sandbox
 // flag or the grading uploader flags.
 func TestExecSuperviseSurface(t *testing.T) {
 	for _, c := range []struct {

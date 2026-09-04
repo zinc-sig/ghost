@@ -50,7 +50,7 @@ func TestSupervisePeakMemorySampled(t *testing.T) {
 // under the full sandbox and asserts a non-zero peak.
 //
 // Gated to SKIP unless BOTH Landlock (ABI>=1, so BestEffort actually enforces)
-// AND cgroup v2 are available at the cgroupns root — on hosts missing either,
+// AND cgroup v2 are available at the cgroupns root. On hosts missing either,
 // the bug is unobservable, so the test would not catch a regression. It skips on
 // dev/CI hosts without Landlock and enforces the contract on capable hosts.
 func TestSuperviseSandboxedPeakMemory(t *testing.T) {

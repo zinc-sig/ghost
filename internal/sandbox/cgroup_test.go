@@ -6,7 +6,7 @@ import "testing"
 
 // requireCgroupV2 skips the test unless cgroup v2 memory accounting is readable
 // at the cgroupns root. On hosts/CI without it (no private cgroupns, cgroup v1,
-// hybrid) the test skips rather than fails — mirroring ghost's Docker-unavailable
+// hybrid) the test skips rather than fails, mirroring ghost's Docker-unavailable
 // skip convention.
 func requireCgroupV2(t *testing.T) {
 	t.Helper()

@@ -87,8 +87,9 @@ func writeHeartbeat(path string) error {
 	// .heartbeat is tightened too (O_CREAT's mode applies only on creation).
 	// OWNERSHIP CAVEAT: fchmod succeeds only on a file ghost owns. The driver
 	// pre-creates /output/.heartbeat root-owned 0666 while ghost runs non-root, so
-	// fchmod returns EPERM there — tolerated as a no-op (tightening a root-owned
-	// file is core's job). When ghost owns the file it is guaranteed 0600.
+	// fchmod returns EPERM there. Ghost treats this as a no-op, because tightening
+	// a root-owned file is core's job. When ghost owns the file it is guaranteed
+	// 0600.
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err

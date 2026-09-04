@@ -13,7 +13,7 @@ const TrailerSchema = 1
 
 // Trailer is the structured result a supervised execution emits when its child
 // finishes. The JSON shape is frozen by the sandbox-runtime contract
-// (backend.ResultTrailer) — field names and types must not change without a
+// (backend.ResultTrailer): field names and types must not change without a
 // coordinated schema bump on both ghost and core.
 type Trailer struct {
 	Schema      int   `json:"schema"`

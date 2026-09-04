@@ -34,7 +34,7 @@ The `--` separator is **required** to distinguish Ghost flags from the target co
 ghost exec [flags] -- <command> [args...]
 ```
 
-Replaces the ghost process via `execve` after redirecting stdio. There is no JSON output, webhook, or upload — the command's exit status becomes ghost's. `--landlock` applies Landlock filesystem restrictions. Network isolation is the container/cluster's responsibility (egress NetworkPolicy via `NetworkMode`/`NetworkPolicy`), not ghost's. `--workdir` sets the working directory for Landlock read-write rules, and `--max-pids` caps processes via `RLIMIT_NPROC` (includes ghost itself; 0 = no limit). `--seccomp-profile-json` takes an inline Docker-format seccomp profile JSON that is compiled to a BPF syscall filter and installed before the command runs (empty = no filter; opt-in).
+Replaces the ghost process via `execve` after redirecting stdio. There is no JSON output, webhook, or upload. The command's exit status becomes ghost's. `--landlock` applies Landlock filesystem restrictions. Network isolation is the container/cluster's responsibility (egress NetworkPolicy via `NetworkMode`/`NetworkPolicy`), not ghost's. `--workdir` sets the working directory for Landlock read-write rules, and `--max-pids` caps processes via `RLIMIT_NPROC` (includes ghost itself; 0 = no limit). `--seccomp-profile-json` takes an inline Docker-format seccomp profile JSON that is compiled to a BPF syscall filter and installed before the command runs (empty = no filter; opt-in).
 
 ### Supervise Command
 
@@ -42,7 +42,7 @@ Replaces the ghost process via `execve` after redirecting stdio. There is no JSO
 ghost supervise [flags] -- <command> [args...]
 ```
 
-Forks the command and keeps ghost alive to measure it (peak memory, OOM attribution, output-size cap), then writes a result trailer to `--result-file` and as a stream frame on stdout. ghost survives the child. It shares `--landlock`, `--workdir`, `--max-pids`, and `--seccomp-profile-json` with `exec`, and adds `--max-output-bytes`, `--result-file`, and `--timeout` (which `exec` does not have — exec replaces the process via `execve`, so it cannot enforce a deadline). Network isolation is the container/cluster's responsibility (egress NetworkPolicy), not ghost's. See [Supervise Mode](#supervise-mode).
+Forks the command and keeps ghost alive to measure it (peak memory, OOM attribution, output-size cap), then writes a result trailer to `--result-file` and as a stream frame on stdout. ghost survives the child. It shares `--landlock`, `--workdir`, `--max-pids`, and `--seccomp-profile-json` with `exec`, and adds `--max-output-bytes`, `--result-file`, and `--timeout`. `exec` does not have `--timeout` because it replaces the process via `execve` and cannot enforce a deadline. Network isolation is the container/cluster's responsibility (egress NetworkPolicy), not ghost's. See [Supervise Mode](#supervise-mode).
 
 ### Diff Command
 
@@ -66,20 +66,20 @@ Runs as PID 1 in a container, writing timestamps for liveness detection and reap
 ghost agent
 ```
 
-Runs ghost in agent mode (RFD 0015 grading runtime): a long-lived Temporal worker inside a grading container. The agent joins a per-run task queue and serves exactly two activities — `ghost-fetch-submission` (downloads the run's inputs into the workspace) and `ghost-run-exec` (runs one resolved exec spec). Each command is executed in a sandboxed **child** process via `ghost exec --landlock --workdir <wd> --max-pids=N`; the agent process itself is never sandboxed because Landlock and `RLIMIT_NPROC` are process-wide and irreversible. Network isolation is the container/cluster's responsibility (egress NetworkPolicy), not ghost's. When the agent is PID 1 it also reaps zombies.
+Runs ghost in agent mode (RFD 0015 grading runtime): a long-lived Temporal worker inside a grading container. The agent joins a per-run task queue and serves exactly two activities: `ghost-fetch-submission` (downloads the run's inputs into the workspace) and `ghost-run-exec` (runs one resolved exec spec). Each command is executed in a sandboxed **child** process via `ghost exec --landlock --workdir <wd> --max-pids=N`; the agent process itself is never sandboxed because Landlock and `RLIMIT_NPROC` are process-wide and irreversible. Network isolation is the container/cluster's responsibility (egress NetworkPolicy), not ghost's. When the agent is PID 1 it also reaps zombies.
 
 The wire contract (activity names, payload shapes, protocol version) is frozen in `internal/agent/contract`. Agent mode has no flags; everything is configured through `GHOST_AGENT_*` environment variables injected by the runner backend at dispatch. The agent strips **every** `GHOST_AGENT_*` variable from the environment of the commands it spawns, so credentials never reach student code.
 
 | Environment Variable | Required | Default | Description |
 |---|---|---|---|
-| `GHOST_AGENT_TEMPORAL_ADDRESS` | yes | — | Temporal frontend `host:port` |
+| `GHOST_AGENT_TEMPORAL_ADDRESS` | yes | none | Temporal frontend `host:port` |
 | `GHOST_AGENT_TEMPORAL_NAMESPACE` | no | `default` | Temporal namespace |
-| `GHOST_AGENT_TASK_QUEUE` | yes | — | Per-run task queue the worker joins |
-| `GHOST_AGENT_TEMPORAL_AUTH_TOKEN` | no | empty | Per-run auth token (unused interim; wired in RFD 0015 Phase 8) |
-| `GHOST_AGENT_STORAGE_ENDPOINT` | yes | — | S3/MinIO endpoint (`host:port`, or URL whose scheme overrides the secure flag) |
-| `GHOST_AGENT_STORAGE_ACCESS_KEY` | yes | — | Object storage access key |
-| `GHOST_AGENT_STORAGE_SECRET_KEY` | yes | — | Object storage secret key |
-| `GHOST_AGENT_STORAGE_SESSION_TOKEN` | no | empty | STS session token (per-run credentials, Phase 8) |
+| `GHOST_AGENT_TASK_QUEUE` | yes | none | Per-run task queue the worker joins |
+| `GHOST_AGENT_TEMPORAL_AUTH_TOKEN` | no | empty | Per-run auth token (unused for now; wired in RFD 0015) |
+| `GHOST_AGENT_STORAGE_ENDPOINT` | yes | none | S3/MinIO endpoint (`host:port`, or URL whose scheme overrides the secure flag) |
+| `GHOST_AGENT_STORAGE_ACCESS_KEY` | yes | none | Object storage access key |
+| `GHOST_AGENT_STORAGE_SECRET_KEY` | yes | none | Object storage secret key |
+| `GHOST_AGENT_STORAGE_SESSION_TOKEN` | no | empty | STS session token (per-run credentials) |
 | `GHOST_AGENT_STORAGE_SECURE` | no | `false` | Use TLS for object storage |
 | `GHOST_AGENT_WORKDIR` | no | `/workspace` | Run workspace root; all relative paths in specs resolve against it |
 | `GHOST_AGENT_STAGING_DIR` | no | fresh 0700 temp dir | Agent-owned staging area for stdin materialisation and stdio captures (never world-writable) |
@@ -100,7 +100,7 @@ export GHOST_AGENT_STORAGE_SECRET_KEY=...
 ghost agent
 ```
 
-The agent runs until it receives SIGTERM/SIGINT, then drains in-flight activities gracefully. On a protocol version mismatch with core it fails activities with the non-retryable `GhostProtocolMismatch` error — rebuild the environment image with a current ghost.
+The agent runs until it receives SIGTERM/SIGINT, then drains in-flight activities gracefully. On a protocol version mismatch with core it fails activities with the non-retryable `GhostProtocolMismatch` error. Rebuild the environment image with a current ghost.
 
 ## Basic Usage
 
@@ -151,7 +151,7 @@ Behavior:
 - Exits after 5 consecutive write failures
 - Reaps zombie children when running as PID 1 (no-op otherwise)
 
-On Linux, when a process dies its parent must call `wait()` to clear it from the process table — otherwise it lingers as a zombie holding a PID slot. Orphaned processes (whose parent died first) get reparented to PID 1, which is responsible for reaping them. In a sandbox container `ghost heartbeat` is PID 1, so it inherits this duty: a `SIGCHLD` handler drains zombies via `Wait4(-1, WNOHANG)`. Without it, fork bomb leftovers would exhaust the cgroup `PidsLimit` and block `docker exec` cleanup commands. This is the same role `tini` and `dumb-init` play.
+On Linux, when a process dies its parent must call `wait()` to clear it from the process table. Otherwise it lingers as a zombie holding a PID slot. Orphaned processes (whose parent died first) get reparented to PID 1, which is responsible for reaping them. In a sandbox container `ghost heartbeat` is PID 1, so it inherits this duty: a `SIGCHLD` handler drains zombies via `Wait4(-1, WNOHANG)`. Without it, fork bomb leftovers would exhaust the cgroup `PidsLimit` and block `docker exec` cleanup commands. This is the same role `tini` and `dumb-init` play.
 
 ## Advanced Features
 
@@ -159,8 +159,8 @@ On Linux, when a process dies its parent must call `wait()` to clear it from the
 
 `exec` and `supervise` expose the `--landlock` filesystem isolation and `--seccomp-profile-json` syscall-filtering flags (Linux only). Network isolation is the container/cluster's responsibility (egress NetworkPolicy via `NetworkMode`/`NetworkPolicy`), not ghost's.
 
-- `--landlock` — apply Landlock filesystem restrictions (no namespaces). `--workdir` sets the read-write working directory.
-- `--seccomp-profile-json` — apply a seccomp syscall filter. The value is an inline Docker-format seccomp profile JSON (single-sourced from core, never authored by ghost); ghost's pure-Go filter compiles it to a BPF program and installs it via `seccomp(2)` with TSYNC before the command runs, so the command and all descendants inherit it. When empty (the default) no filter is applied — the layer is opt-in.
+- `--landlock`: apply Landlock filesystem restrictions (no namespaces). `--workdir` sets the read-write working directory.
+- `--seccomp-profile-json`: apply a seccomp syscall filter. The value is an inline Docker-format seccomp profile JSON (single-sourced from core, never authored by ghost); ghost's pure-Go filter compiles it to a BPF program and installs it via `seccomp(2)` with TSYNC before the command runs, so the command and all descendants inherit it. The layer is opt-in: when empty (the default), no filter is applied.
 
 ```bash
 # Landlock filesystem restrictions only
@@ -191,7 +191,7 @@ ghost run --sandbox --sandbox-workdir /workspace \
   -i /dev/null -o /output/stdout -e /output/stderr -- python script.py
 ```
 
-`run` does not support `--exec`, `--supervise`, `--landlock`, `--max-pids`, `--max-output-bytes`, or `--result-file` — use `exec` or `supervise` for those.
+`run` does not support `--exec`, `--supervise`, `--landlock`, `--max-pids`, `--max-output-bytes`, or `--result-file`. Use `exec` or `supervise` for those.
 
 ### Supervise Mode
 
@@ -213,16 +213,16 @@ ghost supervise --landlock --max-pids=33 \
 ```
 
 Supervise-specific flags:
-- `--max-output-bytes` — total `/output` byte cap (stdout + stderr combined),
+- `--max-output-bytes`: total `/output` byte cap (stdout + stderr combined),
   enforced at write time. Default `1048576` (1 MiB). Excess bytes are dropped
   and the trailer's `truncated` flag is set; the child is never killed for
   overshoot.
-- `--result-file` — where the result trailer JSON is written. Default
+- `--result-file`: where the result trailer JSON is written. Default
   `/output/.result`.
 
 supervise also accepts `--landlock`, `--workdir`, `--max-pids`, and
 `--seccomp-profile-json` (shared with `exec`), plus its own `--timeout` (which
-`exec` lacks). It emits no JSON, webhooks, or uploads — only the result trailer
+`exec` lacks). It emits no JSON, webhooks, or uploads, only the result trailer
 (file + stream frame).
 
 **Child isolation.** `--landlock` applies Landlock filesystem restrictions and
@@ -240,7 +240,7 @@ always receives a trailer rather than a broken stream.
 
 The trailer is a single JSON object, written to two destinations:
 
-1. **A framed line on ghost's own stdout** — the authoritative, forge-proof
+1. **A framed line on ghost's own stdout**: the authoritative, forge-proof
    channel. The child's stdout is redirected to `/output/stdout`, so it never
    holds a writable fd to ghost's fd 1 (the exec-attach stream). Even a
    surviving same-UID child fork cannot forge this frame. Backends read it by
@@ -253,7 +253,7 @@ The trailer is a single JSON object, written to two destinations:
    The two RS (`0x1e`) bytes plus the `ZINC-RESULT` token guard against false
    matches in the child's real output (which lives in `/output/{stdout,stderr}`,
    never on this stream).
-2. **`--result-file`** (e.g. `/output/.result`, mode `0600`) — read directly
+2. **`--result-file`** (e.g. `/output/.result`, mode `0600`): read directly
    off the bind mount, no orchestrator API call. Kept as a transition fallback:
    a same-UID child fork can rewrite this file, so consumers should prefer the
    stdout frame as the authoritative source and treat the file as a fallback
@@ -272,15 +272,15 @@ Trailer schema (version `1`):
 }
 ```
 
-- `exit_code` — the child's wait-status exit code on normal exit; `-1` for a
+- `exit_code`: the child's wait-status exit code on normal exit; `-1` for a
   timeout or any signalled exit (including an OOM `SIGKILL`).
-- `peak_memory_bytes` — sampled from the container's own cgroup v2
+- `peak_memory_bytes`: sampled from the container's own cgroup v2
   (`memory.current` / `memory.peak`) at the cgroupns root. `0` if cgroup v2 is
   not available (a dev-host degradation; cluster backends require cgroup v2).
-- `oom_killed` — true if the cgroup `oom_kill` counter rose during the run.
+- `oom_killed`: true if the cgroup `oom_kill` counter rose during the run.
   This is the authoritative OOM signal, independent of `exit_code`.
-- `truncated` — true if output hit `--max-output-bytes`.
-- `duration_ms` — wall-clock child runtime.
+- `truncated`: true if output hit `--max-output-bytes`.
+- `duration_ms`: wall-clock child runtime.
 
 ### Context Metadata
 
@@ -707,4 +707,3 @@ The target command's exit code is captured in the JSON output's `exit_code` fiel
 
 - [Configuration Reference](CONFIG.md) - Complete list of flags and environment variables
 - [README](README.md) - Quick start guide
-- [Developer Notes](CLAUDE.md) - Implementation details and development guidance

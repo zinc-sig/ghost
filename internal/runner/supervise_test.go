@@ -17,7 +17,7 @@ import (
 )
 
 // decodeResultFile reads and JSON-decodes the supervise result file (the
-// primary Docker transport — plain JSON, no frame sentinels).
+// primary Docker transport: plain JSON, no frame sentinels).
 func decodeResultFile(t *testing.T, path string) output.Trailer {
 	t.Helper()
 	data, err := os.ReadFile(path)

@@ -66,12 +66,12 @@ func (r *reaper) deliver(pid int, ws syscall.WaitStatus) {
 	}
 	// No waiter yet (reaped before WaitChild registered, or a true orphan).
 	// Buffer it; WaitChild collects it. Orphans with no waiter linger here
-	// until the (short-lived) container is torn down — acceptable.
+	// until the (short-lived) container is torn down, which bounds the leak.
 	r.pending[pid] = ws
 }
 
 // WaitChild blocks until pid has been reaped and returns its wait status.
-// ok is false when the reaper is inert (not PID 1) — the caller should use
+// ok is false when the reaper is inert (not PID 1). The caller should use
 // os/exec.Wait, which reaps the child itself in that case.
 func WaitChild(pid int) (ws syscall.WaitStatus, ok bool) {
 	if global == nil {

@@ -39,10 +39,10 @@ func newCappedWriter(w io.Writer, budget *outputBudget) *cappedWriter {
 	return &cappedWriter{w: w, budget: budget}
 }
 
-// Write enforces the cap as it writes. It always reports len(p) so the child's
-// write never short-writes, blocks, or errors once the cap is hit — excess
-// bytes are dropped and the shared truncated flag is set ("Discard but report
-// success", lifted from zinc's LimitedBuffer).
+// Write enforces the cap as it writes. It always reports len(p) so the
+// child's write never short-writes, blocks, or errors once the cap is hit.
+// Excess bytes are dropped and the shared truncated flag is set, the same
+// discard-but-report-success behavior as zinc's LimitedBuffer.
 func (c *cappedWriter) Write(p []byte) (int, error) {
 	c.budget.mu.Lock()
 	if c.budget.remaining <= 0 {

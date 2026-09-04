@@ -13,9 +13,9 @@ import (
 )
 
 // denyLinkProfile is a minimal profile (default allow) that denies the four
-// link-creation syscalls — the same shape core's full allowlist enforces by
-// omission. Used to test the apply mechanism without risking the Go runtime
-// under a default-deny filter.
+// link-creation syscalls. This is the same shape core's full allowlist
+// enforces by omission. Used to test the apply mechanism without risking the
+// Go runtime under a default-deny filter.
 const denyLinkProfile = `{
   "defaultAction": "SCMP_ACT_ALLOW",
   "architectures": ["SCMP_ARCH_AARCH64", "SCMP_ARCH_X86_64", "SCMP_ARCH_X86"],
@@ -41,9 +41,9 @@ func TestApplySeccompFromJSON_DeniesLink(t *testing.T) {
 		}
 		target := filepath.Join(t.TempDir(), "symlink-target")
 		if err := os.Symlink("/etc/hostname", target); err != nil {
-			os.Exit(0) // denied — expected.
+			os.Exit(0) // denied, as expected.
 		}
-		os.Exit(1) // not denied — the filter failed.
+		os.Exit(1) // not denied. The filter failed.
 	}
 
 	// PARENT: pass the JSON inline via env (no file), fork the child.
@@ -92,8 +92,9 @@ func TestBuildProgram_DefaultDenyWithConditional(t *testing.T) {
 
 // TestBuildProgram_LargeAllowlistFitsShortJumps guards the generator invariant
 // that conditional jumps never exceed BPF's 8-bit skip field regardless of
-// allowlist size — the failure mode that a naive one-cell-per-syscall design
-// would hit. It builds a ~400-entry allowlist (larger than core's real one).
+// allowlist size. This is the failure mode that a naive one-cell-per-syscall
+// design would hit. It builds a ~400-entry allowlist (larger than core's real
+// one).
 func TestBuildProgram_LargeAllowlistFitsShortJumps(t *testing.T) {
 	names := make([]string, 0, 400)
 	// Use real x86_64 names so they resolve; repeat the core allowlist-ish set.
@@ -158,7 +159,7 @@ func TestApplySeccompFromJSON_EmptyIsNoOp(t *testing.T) {
 // TestBuildProgram_UnknownArchErrors guards defect fix #1: an unrecognized
 // architecture name must fail fast, not be silently skipped. Skipping is unsafe
 // because if every declared arch is unknown, zero arch blocks are emitted and the
-// filter degenerates to a bare RET defaultAction — a default-ALLOW profile then
+// filter degenerates to a bare RET defaultAction. A default-ALLOW profile then
 // installs an inert filter that silently drops all its intended denials.
 func TestBuildProgram_UnknownArchErrors(t *testing.T) {
 	// All-unknown: the dangerous case that would collapse to an empty filter.
@@ -171,7 +172,7 @@ func TestBuildProgram_UnknownArchErrors(t *testing.T) {
 		t.Fatal("expected error for an unrecognized architecture, got nil (an empty/inert filter would be installed)")
 	}
 
-	// Mixed known+unknown: still fail fast — a typo must not slip through just
+	// Mixed known+unknown: still fail fast. A typo must not slip through just
 	// because other arches are valid.
 	mixed := &seccompProfile{
 		DefaultAction: "SCMP_ACT_ALLOW",
@@ -197,7 +198,7 @@ func TestBuildProgram_UnknownArchErrors(t *testing.T) {
 // index beyond args[5] must be rejected. Left unchecked, argOffsets' uint32
 // arithmetic (16 + 8*index) can wrap a huge index back to a small in-bounds
 // offset, so seccomp(2) would SUCCEED while the filter compares the wrong
-// argument — a silent policy change.
+// argument, silently changing the policy.
 func TestBuildProgram_ArgIndexOutOfRangeErrors(t *testing.T) {
 	profile := &seccompProfile{
 		DefaultAction: "SCMP_ACT_ERRNO",
