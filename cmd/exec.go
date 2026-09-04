@@ -26,7 +26,7 @@ var execCmd = &cobra.Command{
 	Use:   "exec [flags] -- <command> [args...]",
 	Short: "Replace the current process with a command under optional isolation",
 	Long: `Execute a command by replacing the ghost process via syscall.Exec after
-redirecting stdin/stdout/stderr. No JSON output, webhooks, or uploads — the
+redirecting stdin/stdout/stderr. No JSON output, webhooks, or uploads: the
 process is replaced and the command's exit status is ghost's.
 
 Landlock filesystem restrictions (--landlock) are applied as needed. Network

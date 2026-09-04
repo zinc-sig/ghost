@@ -32,8 +32,8 @@ The process handles SIGTERM and SIGINT for graceful shutdown.`,
 }
 
 func init() {
-	heartbeatCmd.Flags().DurationVar(&heartbeatInterval, "interval", 10*time.Second, "interval between heartbeat writes")
-	heartbeatCmd.Flags().StringVar(&heartbeatFile, "file", "/output/.heartbeat", "file to write heartbeat timestamps to")
+	heartbeatCmd.Flags().DurationVar(&heartbeatInterval, "interval", 10*time.Second, "Interval between heartbeat writes")
+	heartbeatCmd.Flags().StringVar(&heartbeatFile, "file", "/output/.heartbeat", "File to write heartbeat timestamps to")
 }
 
 func heartbeatCommand(cmd *cobra.Command, args []string) error {
