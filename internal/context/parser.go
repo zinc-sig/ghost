@@ -1,3 +1,6 @@
+// Package context parses the execution context ghost attaches to a result
+// from key-value pairs, JSON, files, and environment variables. It applies
+// type inference to values and merges the sources by precedence.
 package context
 
 import (

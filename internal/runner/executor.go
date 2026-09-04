@@ -1,3 +1,8 @@
+// Package runner is ghost's execution engine. It runs a target command with
+// file-backed stdio, records exit status and duration, and provides the three
+// execution modes: run (metered, with JSON output), exec (process replacement
+// via execve), and supervise (a surviving parent that meters the child and
+// writes a result trailer).
 package runner
 
 import (

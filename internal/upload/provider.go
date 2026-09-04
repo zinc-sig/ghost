@@ -1,3 +1,6 @@
+// Package upload sends result files to object storage through pluggable
+// providers. It defines the Provider interface and registry and includes a
+// MinIO/S3 provider.
 package upload
 
 import (

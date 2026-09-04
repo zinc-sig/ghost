@@ -1,3 +1,5 @@
+// Package config holds the flag-backed configuration structs shared by the
+// ghost subcommands: context, upload, webhook, and common flags.
 package config
 
 import "time"

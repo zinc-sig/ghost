@@ -1,3 +1,6 @@
+// Package cmd defines the ghost command-line interface on Cobra: the run,
+// diff, exec, supervise, agent, and heartbeat subcommands, their flag
+// validation, and the JSON result written to stdout.
 package cmd
 
 import (

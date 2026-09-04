@@ -1,3 +1,6 @@
+// Package helpers holds the routines the ghost subcommands share: flag
+// registration, I/O flag validation, temporary file handling, timeout
+// parsing, and assembly of the JSON result.
 package helpers
 
 import (

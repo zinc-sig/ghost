@@ -1,3 +1,5 @@
+// Ghost is a command orchestration CLI. It runs an external command and
+// reports structured execution metadata.
 package main
 
 import "github.com/zinc-sig/ghost/cmd"
