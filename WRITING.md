@@ -195,6 +195,13 @@ opened the file.
 // agent replays the activity schedule under Temporal.
 ```
 
+Every package carries a package doc comment: a comment block directly above one
+`package` clause whose first sentence starts with "Package <name>" and says
+what the package is for. When the package's files are all build-constrained,
+put the comment in a neutral `doc.go` with no build tag, so it renders on every
+platform. Keep it to a few sentences; longer background belongs in a package
+README.
+
 ### 8. Body comments explain only the non-obvious
 
 Comment a surprising conditional, an ordering constraint, a workaround for a
