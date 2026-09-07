@@ -67,6 +67,14 @@ const (
 	// EnvWorkdir is the run workspace root all relative paths resolve
 	// against (downloads land here; ExecSpec.Workdir is relative to it).
 	EnvWorkdir = "GHOST_AGENT_WORKDIR"
+
+	// EnvMaxConcurrentExecs bounds how many run-exec activities the agent
+	// serves at once. Core sets it at dispatch and sizes the container's
+	// memory cap from the same number, because every concurrently running
+	// exec's memory budget must fit under the cap for the per-exec budget
+	// to bind before the cap does. An unset or non-positive value leaves
+	// the agent's own default in effect.
+	EnvMaxConcurrentExecs = "GHOST_AGENT_MAX_CONCURRENT_EXECS"
 )
 
 // FetchSubmissionInput asks the agent to download the run's inputs (the
@@ -150,7 +158,18 @@ type ExecSpec struct {
 	// kill-and-flag semantics. Deliberately per-file, unlike supervise's
 	// total-budget --max-output-bytes. 0 means the runtime default applies
 	// (agent-side, GHOST_AGENT_DEFAULT_OUTPUT_LIMIT).
-	OutputLimitBytes int64             `json:"output_limit_bytes"`
+	OutputLimitBytes int64 `json:"output_limit_bytes"`
+	// MemoryLimitBytes budgets the anonymous memory of the exec's process
+	// group. The agent samples the group and kills it when the sum passes
+	// the budget, flagging ExecResult.MemoryLimitExceeded; the container's
+	// cgroup cap backstops what sampling misses, and the agent attributes
+	// a kernel kill at the cap to the exec as well. Core sends the
+	// effective budget on every exec. 0 means no per-exec budget, so only
+	// the container cap applies; unlike OutputLimitBytes, 0 selects no
+	// agent-side default, because an agent that enforced a default of its
+	// own under a core that sizes the container without one would kill
+	// execs the container had room for.
+	MemoryLimitBytes int64             `json:"memory_limit_bytes"`
 	Env              map[string]string `json:"env,omitempty"`
 	Workdir          string            `json:"workdir"`
 }
@@ -186,6 +205,19 @@ type ExecResult struct {
 	// stream hit the cap; on normal runs they are grader-facing metadata.
 	StdoutBytes int64 `json:"stdout_bytes"`
 	StderrBytes int64 `json:"stderr_bytes"`
+	// MemoryLimitExceeded reports that the exec was ended for memory:
+	// the agent killed the process group past ExecSpec.MemoryLimitBytes,
+	// or the kernel killed a process in the group at the container cap
+	// and the agent attributed that kill from the cgroup's oom_kill
+	// counter. Like TimedOut, it is a result, not an error.
+	MemoryLimitExceeded bool `json:"memory_limit_exceeded"`
+	// MemoryLimitBytes echoes the budget enforced for this exec, so the
+	// flag above is readable without the config at hand. 0 = no per-exec
+	// budget was enforced.
+	MemoryLimitBytes int64 `json:"memory_limit_bytes"`
+	// PeakMemoryBytes is the largest sampled anonymous-memory sum of the
+	// exec's process group. 0 = not measured.
+	PeakMemoryBytes int64 `json:"peak_memory_bytes"`
 	// Error is a human-readable infra-level failure (spawn error,
 	// upload failure, and so on). The empty string means none. A non-zero
 	// exit is not an error.

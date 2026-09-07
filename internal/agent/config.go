@@ -46,14 +46,6 @@ const (
 	// (default true; only disabled in test environments where Landlock
 	// is unavailable).
 	EnvSandbox = "GHOST_AGENT_SANDBOX"
-	// EnvMaxConcurrentExecs bounds how many activities the worker runs at
-	// once in this container (default 4; 0 falls back to the default).
-	// Core dispatches all of a stage's scenarios in parallel, so without a
-	// bound a wide stage spawns N children at once and the concurrent
-	// process count can exceed RLIMIT_NPROC (EnvMaxPids), making fork/spawn
-	// fail intermittently ("could not spawn" -> error). Keep
-	// MaxConcurrentExecs * (procs per exec) comfortably under MaxPids.
-	EnvMaxConcurrentExecs = "GHOST_AGENT_MAX_CONCURRENT_EXECS"
 )
 
 // defaultMaxConcurrentExecs bounds concurrent activity execution per
@@ -171,10 +163,10 @@ func LoadConfig() (*Config, error) {
 		cfg.MaxPids = 32
 	}
 
-	if v := os.Getenv(EnvMaxConcurrentExecs); v != "" {
+	if v := os.Getenv(contract.EnvMaxConcurrentExecs); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
-			return nil, fmt.Errorf("agent: invalid %s %q: want a non-negative integer", EnvMaxConcurrentExecs, v)
+			return nil, fmt.Errorf("agent: invalid %s %q: want a non-negative integer", contract.EnvMaxConcurrentExecs, v)
 		}
 		cfg.MaxConcurrentExecs = n
 	}

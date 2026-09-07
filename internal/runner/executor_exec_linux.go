@@ -15,6 +15,19 @@ import (
 // It redirects stdin/stdout/stderr via dup3, optionally applies sandbox restrictions,
 // and then calls execve. This function does not return on success.
 func ExecuteExec(config *Config) error {
+	// Mark the process tree as the preferred out-of-memory victim before
+	// anything else: before the stdio redirection, so a failure is reported
+	// on the agent's stderr rather than inside the student's capture, and
+	// before Landlock, because Landlock refuses writes into /proc and that
+	// refusal is what keeps the student command from lowering the value. A
+	// failure degrades the agent's protection to resident size ordering; it
+	// is not a fault of the command, so execution continues.
+	if config.OOMVictim {
+		if err := sandbox.MarkOOMVictim(); err != nil {
+			fmt.Fprintf(os.Stderr, "exec: %v (continuing; the agent is protected by size ordering only)\n", err)
+		}
+	}
+
 	// Open input file and dup3 to stdin
 	inputFile, err := os.Open(config.InputFile)
 	if err != nil {

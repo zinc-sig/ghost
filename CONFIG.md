@@ -33,6 +33,7 @@ Available **only** on `exec` and `supervise`. Network isolation is the container
 | `--workdir` | Working directory for Landlock read-write rules | No | Current directory |
 | `--max-pids` | Maximum processes for current user via RLIMIT_NPROC (includes ghost itself; 0 = no limit) | No | `0` |
 | `--seccomp-profile-json` | Inline Docker-format seccomp profile JSON (single-sourced from core) compiled to a BPF syscall filter and installed via `seccomp(2)` with TSYNC; empty applies no filter (opt-in, Linux only) | No | `""` (no filter) |
+| `--oom-victim` | `exec` only. Write 1000 to `/proc/self/oom_score_adj` before Landlock so the kernel kills the command tree, not the parent, at the container memory cap; descendants inherit it and Landlock blocks lowering it | No | `false` |
 
 ### Supervise-Only Flags
 

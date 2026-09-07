@@ -18,6 +18,7 @@ var (
 	execWorkdir      string
 	execMaxPids      uint64
 	execMaxFileBytes int64
+	execOOMVictim    bool
 
 	execSeccompProfileJSON string
 )
@@ -64,6 +65,7 @@ func execCommand(cmd *cobra.Command, args []string) error {
 		SandboxWorkDir:     execWorkdir,
 		MaxPids:            execMaxPids,
 		MaxFileBytes:       execMaxFileBytes,
+		OOMVictim:          execOOMVictim,
 		SeccompProfileJSON: execSeccompProfileJSON,
 	}
 
@@ -88,6 +90,10 @@ func init() {
 	// (RLIMIT_FSIZE) enforces the cap instead, and RLIMIT_CORE is zeroed so
 	// the SIGXFSZ kill cannot dump core into the workdir.
 	execCmd.Flags().Int64Var(&execMaxFileBytes, "max-file-bytes", 0, "Cap each file the command (and descendants) writes to this many bytes via RLIMIT_FSIZE; breach kills the writer with SIGXFSZ (0 = no limit)")
+	// Applied before Landlock so the command cannot lower the value back; the
+	// grading agent sets it on every exec so a kernel out-of-memory kill at
+	// the container cap lands in the command tree instead of the agent.
+	execCmd.Flags().BoolVar(&execOOMVictim, "oom-victim", false, "Write 1000 to /proc/self/oom_score_adj before execution so the kernel prefers the command (and descendants) as the out-of-memory victim")
 	execCmd.Flags().StringVar(&execSeccompProfileJSON, "seccomp-profile-json", "", "Docker-format seccomp profile JSON applied to the command (inline, single-sourced from core)")
 
 	execCmd.PreRunE = func(cmd *cobra.Command, args []string) error {

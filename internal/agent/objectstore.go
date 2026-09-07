@@ -34,6 +34,14 @@ type minioStore struct {
 	client *minio.Client
 }
 
+// uploadOptions bounds the memory one upload can hold. NumThreads 1 keeps
+// a multipart upload to a single in-flight part, and PartSize pins the
+// part to minio's minimum, because an upload of unknown size otherwise
+// allocates a part buffer sized for a 5 TiB object. The agent's memory
+// headroom in the container assumes one 16 MiB buffer per concurrent
+// exec; the memory budgets section of README.md shows the arithmetic.
+var uploadOptions = minio.PutObjectOptions{NumThreads: 1, PartSize: 16 << 20}
+
 // newObjectStore builds the minio client from the agent config. An
 // endpoint with an explicit http(s) scheme overrides the secure flag.
 func newObjectStore(cfg *Config) (ObjectStore, error) {
@@ -71,14 +79,14 @@ func (s *minioStore) UploadFile(ctx context.Context, bucket, key, path string) e
 		size = st.Size()
 	}
 
-	if _, err := s.client.PutObject(ctx, bucket, key, f, size, minio.PutObjectOptions{}); err != nil {
+	if _, err := s.client.PutObject(ctx, bucket, key, f, size, uploadOptions); err != nil {
 		return fmt.Errorf("agent: failed to upload %s to %s/%s: %w", path, bucket, key, err)
 	}
 	return nil
 }
 
 func (s *minioStore) UploadBytes(ctx context.Context, bucket, key string, data []byte) error {
-	_, err := s.client.PutObject(ctx, bucket, key, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{})
+	_, err := s.client.PutObject(ctx, bucket, key, bytes.NewReader(data), int64(len(data)), uploadOptions)
 	if err != nil {
 		return fmt.Errorf("agent: failed to upload %d bytes to %s/%s: %w", len(data), bucket, key, err)
 	}
