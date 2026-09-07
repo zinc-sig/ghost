@@ -45,12 +45,15 @@ const heartbeatTickDelayWarn = 3 * time.Second
 type Activities struct {
 	cfg   *Config
 	store ObjectStore
+	// sampler is shared by every running exec: one goroutine enforces all
+	// memory budgets and sweeps escaped processes between execs.
+	sampler *memorySampler
 }
 
 // NewActivities builds the activity implementations from the agent
 // config and an object store (a fake in tests).
 func NewActivities(cfg *Config, store ObjectStore) *Activities {
-	return &Activities{cfg: cfg, store: store}
+	return &Activities{cfg: cfg, store: store, sampler: newMemorySampler()}
 }
 
 // checkProtocol fails the activity with a non-retryable ApplicationError
@@ -189,7 +192,21 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 	}
 	res.OutputLimitBytes = outputLimit
 
-	args := []string{"exec", "-i", stdinPath, "-o", stdoutCapture, "-e", stderrCapture}
+	// Memory budget: the spec value enforced on the process group by the
+	// sampler, echoed on the result. 0 means no per-exec enforcement and
+	// selects no agent default, because core sizes the container cap from
+	// the budgets it sent; the contract comment on MemoryLimitBytes states
+	// the reason.
+	memoryLimit := spec.MemoryLimitBytes
+	if memoryLimit < 0 {
+		memoryLimit = 0
+	}
+	res.MemoryLimitBytes = memoryLimit
+
+	// --oom-victim makes a kernel kill at the container cap land in the
+	// command tree rather than the agent; it is applied regardless of
+	// a.cfg.Sandbox because it protects the agent, not the workspace.
+	args := []string{"exec", "-i", stdinPath, "-o", stdoutCapture, "-e", stderrCapture, "--oom-victim"}
 	if a.cfg.Sandbox {
 		args = append(args, "--landlock", "--workdir", a.cfg.Workdir)
 	}
@@ -217,7 +234,11 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 		timeout = time.Duration(spec.TimeoutMs) * time.Millisecond
 	}
 
-	if err := cmd.Start(); err != nil {
+	// Start and register with the sampler in one step so the new process
+	// group is never visible to a sibling exec's orphan sweep before it is
+	// registered.
+	watch, err := a.sampler.startWatched(cmd, memoryLimit)
+	if err != nil {
 		// Could not spawn: ExitCode stays null per the contract; no
 		// stdio was produced, so nothing is uploaded.
 		return infraFail(fmt.Errorf("failed to spawn command: %w", err))
@@ -287,6 +308,7 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 		timer.Stop()
 		killProcessGroup(cmd)
 		<-waitCh
+		a.sampler.finish(watch)
 		finish()
 		return contract.ExecResult{}, ctx.Err()
 	}
@@ -298,6 +320,22 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 	// this is a harmless repeat).
 	killProcessGroup(cmd)
 	finish()
+
+	// Unregister from the sampler after the group is dead, so its final
+	// sample can attribute a kernel kill in the last tick and its sweep can
+	// remove any process that escaped the group. MemoryLimitExceeded is a
+	// result, not an error, like TimedOut.
+	mem := a.sampler.finish(watch)
+	res.MemoryLimitExceeded = mem.exceeded
+	res.PeakMemoryBytes = mem.peak
+	if mem.exceeded {
+		logger.Info("run-exec memory limit exceeded", "stage", in.Stage, "scenario", in.ScenarioCode,
+			"killed_by", mem.reason, "limit_bytes", memoryLimit, "peak_bytes", mem.peak)
+	}
+	if len(mem.swept) > 0 {
+		logger.Warn("run-exec orphan sweep killed processes outside every running exec's group",
+			"stage", in.Stage, "scenario", in.ScenarioCode, "pids", mem.swept)
+	}
 
 	var infraErrs []string
 	switch {

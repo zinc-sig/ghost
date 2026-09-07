@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"runtime/debug"
 
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
@@ -14,10 +15,31 @@ import (
 	"github.com/zinc-sig/ghost/internal/agent/contract"
 )
 
+// agentMemoryLimit is the Go soft memory limit the agent runs under when
+// GOMEMLIMIT is not set. The agent shares the container's memory cap with
+// the student processes, and core sizes the cap with 256 MiB of headroom
+// for the agent: this limit plus the 64 MiB shared-memory tmpfs. Within
+// the limit sit the agent's baseline heap and one 16 MiB upload buffer per
+// concurrent exec.
+const agentMemoryLimit = 192 << 20
+
 // Run connects to Temporal, joins the per-run task queue and serves the
 // two contract activities until interrupted (SIGTERM/SIGINT drain the
-// worker gracefully).
+// worker gracefully). The agent runs under a Go soft memory limit of
+// agentMemoryLimit unless GOMEMLIMIT is set, so its own heap stays inside
+// the headroom core adds to the container cap for it; a larger heap would
+// let the agent's garbage collector defer collection until the cap, where
+// the kernel kills a student process. The memory budgets section of
+// README.md explains the layers.
 func Run(cfg *Config) error {
+	if os.Getenv("GOMEMLIMIT") == "" {
+		debug.SetMemoryLimit(agentMemoryLimit)
+	}
+	// Orphans of exec children reparent to the agent so the sweep after
+	// each exec finds them; as pid 1 this is already the case.
+	if err := enableChildSubreaper(); err != nil {
+		fmt.Fprintf(os.Stderr, "ghost agent: child subreaper: %v (continuing; escaped processes are swept only as pid 1)\n", err)
+	}
 	// Pin GOMAXPROCS to the container's cgroup CPU quota (core backend/12
 	// root-cause fix). Grading containers run with a 1-CPU bandwidth quota
 	// while the node has ~16 cores; Go 1.24 sizes GOMAXPROCS from

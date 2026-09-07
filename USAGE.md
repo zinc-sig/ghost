@@ -34,7 +34,7 @@ The `--` separator is **required** to distinguish Ghost flags from the target co
 ghost exec [flags] -- <command> [args...]
 ```
 
-Replaces the ghost process via `execve` after redirecting stdio. There is no JSON output, webhook, or upload. The command's exit status becomes ghost's. `--landlock` applies Landlock filesystem restrictions. Network isolation is the container/cluster's responsibility (egress NetworkPolicy via `NetworkMode`/`NetworkPolicy`), not ghost's. `--workdir` sets the working directory for Landlock read-write rules, and `--max-pids` caps processes via `RLIMIT_NPROC` (includes ghost itself; 0 = no limit). `--seccomp-profile-json` takes an inline Docker-format seccomp profile JSON that is compiled to a BPF syscall filter and installed before the command runs (empty = no filter; opt-in).
+Replaces the ghost process via `execve` after redirecting stdio. There is no JSON output, webhook, or upload. The command's exit status becomes ghost's. `--landlock` applies Landlock filesystem restrictions. Network isolation is the container/cluster's responsibility (egress NetworkPolicy via `NetworkMode`/`NetworkPolicy`), not ghost's. `--workdir` sets the working directory for Landlock read-write rules, and `--max-pids` caps processes via `RLIMIT_NPROC` (includes ghost itself; 0 = no limit). `--seccomp-profile-json` takes an inline Docker-format seccomp profile JSON that is compiled to a BPF syscall filter and installed before the command runs (empty = no filter; opt-in). `--oom-victim` writes 1000 to `/proc/self/oom_score_adj` before Landlock is applied, so when the container's memory cap is hit the kernel kills a process in the command tree rather than the parent that spawned ghost; the value is inherited by every descendant and Landlock stops the command from lowering it back.
 
 ### Supervise Command
 
@@ -66,7 +66,7 @@ Runs as PID 1 in a container, writing timestamps for liveness detection and reap
 ghost agent
 ```
 
-Runs ghost in agent mode (RFD 0015 grading runtime): a long-lived Temporal worker inside a grading container. The agent joins a per-run task queue and serves exactly two activities: `ghost-fetch-submission` (downloads the run's inputs into the workspace) and `ghost-run-exec` (runs one resolved exec spec). Each command is executed in a sandboxed **child** process via `ghost exec --landlock --workdir <wd> --max-pids=N`; the agent process itself is never sandboxed because Landlock and `RLIMIT_NPROC` are process-wide and irreversible. Network isolation is the container/cluster's responsibility (egress NetworkPolicy), not ghost's. When the agent is PID 1 it also reaps zombies.
+Runs ghost in agent mode (RFD 0015 grading runtime): a long-lived Temporal worker inside a grading container. The agent joins a per-run task queue and serves exactly two activities: `ghost-fetch-submission` (downloads the run's inputs into the workspace) and `ghost-run-exec` (runs one resolved exec spec). Each command is executed in a sandboxed **child** process via `ghost exec --landlock --workdir <wd> --max-pids=N --max-file-bytes=N --oom-victim`; the agent process itself is never sandboxed because Landlock and `RLIMIT_NPROC` are process-wide and irreversible. Per exec the agent applies the spec's timeout, its per-file output limit, and its memory budget (`memory_limit_bytes`, enforced on the exec's process group by a sampler; 0 means no per-exec budget), marks the child as the preferred out-of-memory victim, and reports the peak memory it sampled. The memory budgets section of `internal/agent/README.md` explains the layers and the attribution rule. Network isolation is the container/cluster's responsibility (egress NetworkPolicy), not ghost's. When the agent is PID 1 it also reaps zombies.
 
 The wire contract (activity names, payload shapes, protocol version) is frozen in `internal/agent/contract`. Agent mode has no flags; everything is configured through `GHOST_AGENT_*` environment variables injected by the runner backend at dispatch. The agent strips **every** `GHOST_AGENT_*` variable from the environment of the commands it spawns, so credentials never reach student code.
 
@@ -88,7 +88,7 @@ The wire contract (activity names, payload shapes, protocol version) is frozen i
 | `GHOST_AGENT_SANDBOX` | no | `true` | When true, the child runs with `--landlock` (disable only where the kernel lacks Landlock support, e.g. tests) |
 | `GHOST_AGENT_MAX_CONCURRENT_EXECS` | no | `4` | Activities the worker runs at once in this container (0 falls back to the default) |
 
-The first ten names are part of the frozen contract (`contract.Env*` consts); the last five are agent-internal knobs that share the prefix so they are scrubbed alongside the credentials.
+`GHOST_AGENT_MAX_CONCURRENT_EXECS` and the first ten names are part of the frozen contract (`contract.Env*` consts); core derives the concurrency from the memory budgets of the pipeline and sizes the container cap from the same number. The other four are agent-internal knobs that share the prefix so they are scrubbed alongside the credentials.
 
 ```bash
 # Typical container entrypoint
@@ -167,10 +167,11 @@ On Linux, when a process dies its parent must call `wait()` to clear it from the
 ghost exec --landlock --workdir /workspace \
   -i /dev/null -o /output/stdout -e /output/stderr -- python script.py
 
-# Landlock + a process-count cap; this is what the grading agent runs per exec
-# spec when GHOST_AGENT_SANDBOX is on (with --max-pids from GHOST_AGENT_MAX_PIDS,
-# default 32). Egress is restricted by the container/cluster, not ghost.
-ghost exec --landlock --workdir /workspace --max-pids=32 \
+# Landlock, a process-count cap, and the out-of-memory victim mark; this is
+# what the grading agent runs per exec spec when GHOST_AGENT_SANDBOX is on
+# (with --max-pids from GHOST_AGENT_MAX_PIDS, default 32). Egress is
+# restricted by the container/cluster, not ghost.
+ghost exec --landlock --workdir /workspace --max-pids=32 --oom-victim \
   -i /dev/null -o /output/stdout -e /output/stderr -- python3 main.py
 ```
 

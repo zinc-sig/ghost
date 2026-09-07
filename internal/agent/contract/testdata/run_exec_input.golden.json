@@ -13,6 +13,7 @@
     "stdout_path": "q_sa.out",
     "timeout_ms": 10000,
     "output_limit_bytes": 67108864,
+    "memory_limit_bytes": 268435456,
     "env": {
       "LANG": "C"
     },

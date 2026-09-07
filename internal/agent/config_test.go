@@ -74,7 +74,7 @@ func TestLoadConfigOverrides(t *testing.T) {
 	t.Setenv(contract.EnvTemporalAuthToken, "auth-token")
 	t.Setenv(EnvSandbox, "false")
 	t.Setenv(EnvMaxPids, "128")
-	t.Setenv(EnvMaxConcurrentExecs, "8")
+	t.Setenv(contract.EnvMaxConcurrentExecs, "8")
 	t.Setenv(EnvDefaultTimeout, "5m")
 	t.Setenv(EnvDefaultOutputLimit, "1048576")
 

@@ -32,12 +32,26 @@ func TestMain(m *testing.M) {
 	}
 	ghostBin = filepath.Join(tmp, "ghost")
 
-	build := exec.Command("go", "build", "-o", ghostBin, ".")
-	build.Dir = "../.." // module root
-	if out, err := build.CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to build ghost binary: %v\n%s", err, out)
-		_ = os.RemoveAll(tmp)
+	// Orphans of test children reparent to this process, as they do to
+	// the agent as pid 1, so the orphan sweep tests see them.
+	if err := enableChildSubreaper(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to enable child subreaper: %v\n", err)
 		os.Exit(1)
+	}
+
+	// GHOST_TEST_BIN points at a prebuilt ghost binary so the suite can run
+	// where no Go toolchain is present, such as inside a memory-capped
+	// container that exercises the kernel out-of-memory path.
+	if prebuilt := os.Getenv("GHOST_TEST_BIN"); prebuilt != "" {
+		ghostBin = prebuilt
+	} else {
+		build := exec.Command("go", "build", "-o", ghostBin, ".")
+		build.Dir = "../.." // module root
+		if out, err := build.CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to build ghost binary: %v\n%s", err, out)
+			_ = os.RemoveAll(tmp)
+			os.Exit(1)
+		}
 	}
 
 	code := m.Run()
