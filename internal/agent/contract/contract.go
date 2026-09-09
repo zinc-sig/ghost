@@ -21,7 +21,7 @@ import "time"
 // difference. This surfaces "agent too old, rebuild the environment
 // image" at the readiness handshake instead of a confusing payload
 // decode error mid-run (RFD 0015 Decision 3).
-const ProtocolVersion = 1
+const ProtocolVersion = 2
 
 // ProtocolMismatchErrorType is the Temporal ApplicationError type the
 // agent uses for version-skew failures. Core treats it as terminal for
