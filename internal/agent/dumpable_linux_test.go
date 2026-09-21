@@ -35,6 +35,11 @@ func TestDisableDumpable(t *testing.T) {
 	if got := dumpable(t); got != 0 {
 		t.Fatalf("dumpable = %d after disableDumpable, want 0", got)
 	}
+	// The agent resolves its own binary through /proc/self/exe to spawn ghost
+	// exec; the kernel exempts a process from the gate on its own entry.
+	if _, err := os.Executable(); err != nil {
+		t.Fatalf("os.Executable from the non-dumpable process: %v", err)
+	}
 
 	child := exec.Command("sleep", "5")
 	if err := child.Start(); err != nil {
