@@ -261,6 +261,102 @@ func TestFetchSubmission_RetryIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestFetchSubmission_RetryOverReplacedShapes asserts that a second
+// attempt succeeds when the first one changed the type of a delivered
+// path: a delivered directory replaced by a teacher file or by the answer,
+// and a delivered file replaced by a directory a teacher file or the
+// answer needs. The re-download meets that residue first, and a fetch that
+// failed on it would turn the one retry core grants into a run failure.
+func TestFetchSubmission_RetryOverReplacedShapes(t *testing.T) {
+	downloads := []contract.DownloadSpec{{Bucket: "b", Prefix: "sub/", TargetDir: "."}}
+	cases := []struct {
+		name    string
+		objects map[string][]byte
+		in      contract.FetchSubmissionInput
+		want    map[string]string
+		missing []string
+	}{
+		{
+			"delivered directory replaced by a teacher file",
+			map[string][]byte{
+				"sub/pom.xml/inner.txt": []byte("delivered directory\n"),
+				"asset/pom.xml":         []byte("teacher pom\n"),
+			},
+			contract.FetchSubmissionInput{
+				ProtocolVersion: contract.ProtocolVersion,
+				Downloads:       downloads,
+				Objects:         []contract.ObjectSpec{{Bucket: "b", Key: "asset/pom.xml", TargetPaths: []string{"pom.xml"}}},
+			},
+			map[string]string{"pom.xml": "teacher pom\n"},
+			[]string{"pom.xml/inner.txt"},
+		},
+		{
+			"delivered file replaced by a teacher directory",
+			map[string][]byte{
+				"sub/src":         []byte("delivered file\n"),
+				"asset/Main.java": []byte("teacher main\n"),
+			},
+			contract.FetchSubmissionInput{
+				ProtocolVersion: contract.ProtocolVersion,
+				Downloads:       downloads,
+				Objects:         []contract.ObjectSpec{{Bucket: "b", Key: "asset/Main.java", TargetPaths: []string{"src/Main.java"}}},
+			},
+			map[string]string{"src/Main.java": "teacher main\n"},
+			nil,
+		},
+		{
+			"delivered directory replaced by the answer",
+			map[string][]byte{
+				"sub/q_java.java":         []byte("student\n"),
+				"sub/src/Solution.java/x": []byte("delivered directory\n"),
+			},
+			contract.FetchSubmissionInput{
+				ProtocolVersion: contract.ProtocolVersion,
+				Downloads:       downloads,
+				Answer:          &contract.AnswerSpec{Stem: "q_java", TargetPath: "src/Solution.java"},
+			},
+			map[string]string{"src/Solution.java": "student\n"},
+			[]string{"q_java.java", "src/Solution.java/x"},
+		},
+		{
+			"delivered file replaced by the answer's parent directory",
+			map[string][]byte{
+				"sub/q_java.java": []byte("student\n"),
+				"sub/src":         []byte("delivered file\n"),
+			},
+			contract.FetchSubmissionInput{
+				ProtocolVersion: contract.ProtocolVersion,
+				Downloads:       downloads,
+				Answer:          &contract.AnswerSpec{Stem: "q_java", TargetPath: "src/Solution.java"},
+			},
+			map[string]string{"src/Solution.java": "student\n"},
+			[]string{"q_java.java"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := newTestConfig(t)
+			store := newFakeStore()
+			store.objects["b"] = tc.objects
+			env := newActivityEnv(t, cfg, store)
+
+			first, err := fetchRun(t, env, tc.in)
+			if err != nil {
+				t.Fatalf("first attempt failed: %v", err)
+			}
+			second, err := fetchRun(t, env, tc.in)
+			if err != nil {
+				t.Fatalf("second attempt over the first one's residue failed: %v", err)
+			}
+			if !reflect.DeepEqual(first, second) {
+				t.Errorf("second attempt result = %+v, want %+v", second, first)
+			}
+			wantFiles(t, cfg.Workdir, tc.want)
+			wantMissing(t, cfg.Workdir, tc.missing...)
+		})
+	}
+}
+
 // TestFetchSubmission_AnswerRestoredAtRootName asserts that an empty
 // target restores the answer under its delivered name after the objects,
 // so a teacher object with the same name loses to the student's file.

@@ -25,7 +25,10 @@ type ObjectStore interface {
 	UploadBytes(ctx context.Context, bucket, key string, data []byte) error
 	// DownloadPrefix mirrors every object under bucket/prefix into
 	// targetDir, returning the number of files and total bytes written.
-	// Object keys that would escape targetDir are rejected.
+	// Object keys that would escape targetDir are rejected. Each file
+	// replaces whatever is at its path, a directory included, and a file
+	// where one of its parent directories must be; the last key listed
+	// wins a path, and a retry rewrites what an earlier attempt left.
 	DownloadPrefix(ctx context.Context, bucket, prefix, targetDir string) (files int, bytes int64, err error)
 	// DownloadObject writes the object at bucket/key to every path in
 	// dests, creating or truncating each with mode, and returns the
@@ -219,15 +222,19 @@ func objectDestination(targetDir, prefix, key string) (string, error) {
 }
 
 // materializeObject writes one object's content to its traversal-safe
-// destination under targetDir, creating parent directories (0755). It is
-// shared by the real store and test fakes so the defence is uniform.
+// destination under targetDir, creating parent directories (0755). The
+// destination is prepared as every staging write is (prepareFileTarget),
+// so a directory at the path or a file where a parent must be is replaced
+// rather than failing the download, and a symlink there is removed rather
+// than followed. It is shared by the real store and test fakes so the
+// defence is uniform.
 func materializeObject(targetDir, prefix, key string, r io.Reader) (int64, error) {
 	dest, err := objectDestination(targetDir, prefix, key)
 	if err != nil {
 		return 0, err
 	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return 0, fmt.Errorf("agent: failed to create directory for %s: %w", dest, err)
+	if err := prepareFileTarget(targetDir, dest, 0o755); err != nil {
+		return 0, fmt.Errorf("agent: %w", err)
 	}
 	f, err := os.Create(dest)
 	if err != nil {

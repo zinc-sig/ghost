@@ -16,7 +16,10 @@ retried fetch never depends on what an earlier attempt left in the staging
 directory:
 
 1. Every `downloads` entry, in list order: the objects under the prefix are
-   mirrored into the target directory.
+   mirrored into the target directory. Each mirrored file replaces whatever
+   is at its path, a directory included, and a file where one of its parent
+   directories must be, so the last key listed wins a path and a retried
+   attempt rewrites the shape an earlier one left behind.
 2. The answer is set aside. When the input carries `answer`, the agent
    lists the regular files directly under the workspace root whose name
    minus its extension equals `stem` and moves the first in byte-wise name

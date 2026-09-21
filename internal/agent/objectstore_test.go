@@ -1,9 +1,58 @@
 package agent
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// TestMaterializeObjectReplacesBlockers asserts that a mirrored file
+// replaces a directory at its path and a file where a parent directory
+// must be, and that a symlink at its path is removed rather than written
+// through; os.Create would otherwise follow the link.
+func TestMaterializeObjectReplacesBlockers(t *testing.T) {
+	target := t.TempDir()
+	mustWrite := func(rel, content string) {
+		t.Helper()
+		p := filepath.Join(target, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mirror := func(key, content string) {
+		t.Helper()
+		if _, err := materializeObject(target, "sub/", key, strings.NewReader(content)); err != nil {
+			t.Fatalf("materializeObject(%q): %v", key, err)
+		}
+	}
+
+	mustWrite("pom.xml/inner.txt", "directory at the path")
+	mirror("sub/pom.xml", "file")
+	wantFiles(t, target, map[string]string{"pom.xml": "file"})
+	wantMissing(t, target, "pom.xml/inner.txt")
+
+	mustWrite("src", "file where a directory must be")
+	mirror("sub/src/Main.java", "nested")
+	wantFiles(t, target, map[string]string{"src/Main.java": "nested"})
+
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(target, "link")); err != nil {
+		t.Fatal(err)
+	}
+	mirror("sub/link", "replaced link")
+	if st, err := os.Lstat(filepath.Join(target, "link")); err != nil || !st.Mode().IsRegular() {
+		t.Errorf("link at the path was not replaced by a regular file: %v", err)
+	}
+	wantFiles(t, target, map[string]string{"link": "replaced link"})
+	wantFiles(t, filepath.Dir(outside), map[string]string{"outside.txt": "outside"})
+}
 
 func TestObjectDestination(t *testing.T) {
 	target := t.TempDir()

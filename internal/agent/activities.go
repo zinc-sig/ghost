@@ -258,24 +258,36 @@ func resolveFile(root, rel string) (string, error) {
 	return dest, nil
 }
 
-// placeFile prepares dest for a file write under root and returns it: a
-// non-directory on the way (a delivered file where a directory must be)
-// and anything at the target that is not a regular file are removed, and
-// missing parents are created with dirMode. The caller creates or
-// truncates the file itself, so a regular file at the target is replaced
-// by the write rather than removed here.
+// placeFile resolves a workspace-relative file path under root, prepares
+// it for a file write (see prepareFileTarget), and returns the absolute
+// destination.
 func placeFile(root, rel string, dirMode os.FileMode) (string, error) {
 	dest, err := resolveFile(root, rel)
 	if err != nil {
 		return "", err
 	}
+	if err := prepareFileTarget(root, dest, dirMode); err != nil {
+		return "", err
+	}
+	return dest, nil
+}
+
+// prepareFileTarget clears the way for a file write at dest, an absolute
+// path inside root: a non-directory on the way (a file or link where a
+// directory must be) and anything at dest that is not a regular file are
+// removed, and missing parents are created with dirMode. The caller
+// creates or truncates the file itself, so a regular file at dest is
+// replaced by the write rather than removed here. Every staging write
+// goes through it, so a path whose type a previous write or a previous
+// attempt changed is rewritten instead of failing the fetch.
+func prepareFileTarget(root, dest string, dirMode os.FileMode) error {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
-		return "", fmt.Errorf("failed to resolve workspace root %s: %w", root, err)
+		return fmt.Errorf("failed to resolve root %s: %w", root, err)
 	}
 	relPath, err := filepath.Rel(absRoot, dest)
 	if err != nil {
-		return "", fmt.Errorf("path %q: %w", rel, err)
+		return err
 	}
 	parts := strings.Split(relPath, string(filepath.Separator))
 	dir := absRoot
@@ -286,7 +298,7 @@ func placeFile(root, rel string, dirMode os.FileMode) (string, error) {
 			break
 		}
 		if err != nil {
-			return "", fmt.Errorf("failed to inspect %s: %w", dir, err)
+			return fmt.Errorf("failed to inspect %s: %w", dir, err)
 		}
 		if st.IsDir() {
 			continue
@@ -294,19 +306,19 @@ func placeFile(root, rel string, dirMode os.FileMode) (string, error) {
 		// Nothing can exist below a file or link, so removing it clears
 		// the rest of the path for MkdirAll.
 		if err := os.Remove(dir); err != nil {
-			return "", fmt.Errorf("failed to remove %s: %w", dir, err)
+			return fmt.Errorf("failed to remove %s: %w", dir, err)
 		}
 		break
 	}
 	if st, err := os.Lstat(dest); err == nil && !st.Mode().IsRegular() {
 		if err := os.RemoveAll(dest); err != nil {
-			return "", fmt.Errorf("failed to remove %s: %w", dest, err)
+			return fmt.Errorf("failed to remove %s: %w", dest, err)
 		}
 	}
 	if err := os.MkdirAll(filepath.Dir(dest), dirMode); err != nil {
-		return "", fmt.Errorf("failed to create directory for %s: %w", dest, err)
+		return fmt.Errorf("failed to create directory for %s: %w", dest, err)
 	}
-	return dest, nil
+	return nil
 }
 
 // objectBlocks reports a teacher object standing in the answer's way at
