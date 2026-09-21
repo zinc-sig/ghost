@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zinc-sig/ghost/internal/cpuquota"
 	"github.com/zinc-sig/ghost/internal/output"
 	"github.com/zinc-sig/ghost/internal/sandbox"
 )
@@ -32,6 +33,13 @@ const gracefulShutdownDelay = 5 * time.Second
 // result file and as a stream frame on ghost's own stdout. Unlike ExecuteExec,
 // ghost is not replaced. It survives the child to measure and report.
 func Supervise(config *Config) error {
+	// The Go runtime's thread count follows the container's CPU quota so the
+	// supervisor takes few of the RLIMIT_NPROC slots it shares with the child;
+	// see cpuquota.PinGOMAXPROCS. An unreadable quota leaves the default.
+	if err := cpuquota.PinGOMAXPROCS(nil); err != nil {
+		fmt.Fprintf(os.Stderr, "ghost supervise: maxprocs: %v (continuing with default GOMAXPROCS)\n", err)
+	}
+
 	inputFile, err := os.Open(config.InputFile)
 	if err != nil {
 		return fmt.Errorf("supervise: failed to open input file %s: %w", config.InputFile, err)
@@ -77,12 +85,9 @@ func Supervise(config *Config) error {
 	// NetworkPolicy), not ghost's. Setpgid lets the timeout escalation signal
 	// the whole process group.
 	if config.Landlock {
-		// Applied to the parent pre-fork and inherited by the child. Supervise
-		// also needs cgroup reads (sampling); scoped here, not in exec's base
-		// sandbox.
-		if err := sandbox.ApplySandboxWith(config.SandboxWorkDir, sandbox.SandboxOpts{
-			AllowCgroupRead: true,
-		}); err != nil {
+		// Applied to the parent pre-fork and inherited by the child. The
+		// ruleset keeps /sys/fs/cgroup readable, which the sampler below needs.
+		if err := sandbox.ApplySandbox(config.SandboxWorkDir); err != nil {
 			return fmt.Errorf("supervise: %w", err)
 		}
 	}
@@ -113,8 +118,9 @@ func Supervise(config *Config) error {
 	}
 
 	// §12.3 / §7: set RLIMIT_NPROC in the parent before fork; it is inherited
-	// by the child. Goroutines are threads of one process and consume no PID
-	// slots, so ghost = 1 slot and core's +1 reserve holds.
+	// by the child. The kernel counts every thread of the UID, so ghost's own
+	// runtime threads share the cap with the child; core's base allowance
+	// covers them.
 	if config.MaxPids > 0 {
 		if err := sandbox.EnforceMaxPids(config.MaxPids); err != nil {
 			return fmt.Errorf("supervise: failed to enforce max pids: %w", err)

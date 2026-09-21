@@ -10,36 +10,28 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// SandboxOpts enables opt-in Landlock grants that supervise needs beyond the
-// base ruleset used by exec.
-type SandboxOpts struct {
-	// AllowCgroupRead grants RO /sys/fs/cgroup so supervise's sampler can read
-	// memory.current/peak/events after Landlock is applied.
-	AllowCgroupRead bool
-}
-
-// ApplySandbox applies the base Landlock filesystem restrictions.
-// Read-only: /usr, /bin, /lib, /lib64, /etc (ignored if missing), /proc/self/fd.
-// Read-write: /output, /tmp, /dev, and the given work directory.
+// ApplySandbox applies the Landlock filesystem restrictions shared by exec
+// and supervise. Read-only: /usr, /bin, /lib, /lib64, /etc, /proc, and
+// /sys/fs/cgroup, each ignored if missing. Read-write: /output, /tmp, /dev,
+// and the given work directory.
 func ApplySandbox(workDir string) error {
-	return ApplySandboxWith(workDir, SandboxOpts{})
-}
-
-// ApplySandboxWith applies the base Landlock restrictions (see ApplySandbox)
-// plus any grants enabled in opts.
-func ApplySandboxWith(workDir string, opts SandboxOpts) error {
 	if workDir == "" {
 		return fmt.Errorf("sandbox: workDir must not be empty")
 	}
 
 	rules := []landlock.Rule{
 		landlock.RODirs("/usr", "/bin", "/lib", "/lib64", "/etc").IgnoreIfMissing(),
-		landlock.RODirs("/proc/self/fd"),
+		// /proc and /sys/fs/cgroup are readable so a container-aware runtime
+		// such as the JVM finds its cgroup (through /proc/self/cgroup and
+		// /proc/self/mountinfo) and sizes its heap and threads to the
+		// container rather than the host. The grant covers all of /proc
+		// because /proc/self is a different path in every process of the
+		// command tree. Writes into /proc stay refused, so the oom_score_adj
+		// set by exec holds, and the agent runs non-dumpable so its own
+		// /proc entry stays unreadable. supervise's sampler reads the cgroup
+		// files after this is applied.
+		landlock.RODirs("/proc", "/sys/fs/cgroup").IgnoreIfMissing(),
 		landlock.RWDirs("/output", "/tmp", "/dev", workDir),
-	}
-	if opts.AllowCgroupRead {
-		// RO + IgnoreIfMissing for non-cgroup-v2 hosts.
-		rules = append(rules, landlock.RODirs("/sys/fs/cgroup").IgnoreIfMissing())
 	}
 
 	if err := landlock.V5.BestEffort().RestrictPaths(rules...); err != nil {
@@ -56,10 +48,10 @@ func LandlockAvailable() bool {
 	return err == nil && v >= 1
 }
 
-// EnforceMaxPids sets RLIMIT_NPROC to limit the total number of processes for
-// the current user (UID). The limit counts ALL processes for the UID, including
-// the ghost process itself. For example, with maxPids=33, ghost uses 1 slot and
-// the student command can create up to 32 processes (including itself).
+// EnforceMaxPids sets RLIMIT_NPROC for the current UID. The kernel counts
+// every task of the UID against it, threads included, so ghost's own runtime
+// threads take slots alongside the command's processes and threads. Core
+// sizes the value with a base allowance that absorbs ghost's share.
 func EnforceMaxPids(maxPids uint64) error {
 	return unix.Setrlimit(unix.RLIMIT_NPROC, &unix.Rlimit{Cur: maxPids, Max: maxPids})
 }

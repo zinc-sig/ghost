@@ -2,7 +2,6 @@ package agent
 
 import (
 	"fmt"
-	"math"
 	"os"
 	"runtime"
 	"runtime/debug"
@@ -10,9 +9,9 @@ import (
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
-	"go.uber.org/automaxprocs/maxprocs"
 
 	"github.com/zinc-sig/ghost/internal/agent/contract"
+	"github.com/zinc-sig/ghost/internal/cpuquota"
 )
 
 // agentMemoryLimit is the Go soft memory limit the agent runs under when
@@ -40,42 +39,28 @@ func Run(cfg *Config) error {
 	if err := enableChildSubreaper(); err != nil {
 		fmt.Fprintf(os.Stderr, "ghost agent: child subreaper: %v (continuing; escaped processes are swept only as pid 1)\n", err)
 	}
-	// Pin GOMAXPROCS to the container's cgroup CPU quota (core backend/12
-	// root-cause fix). Grading containers run with a 1-CPU bandwidth quota
-	// while the node has ~16 cores; Go 1.24 sizes GOMAXPROCS from
-	// runtime.NumCPU() (the quota does not lower nproc), so the runtime
-	// carries 16 Ps' worth of scheduling and timer machinery on a sliver of
-	// one CPU shared with CPU-pegging student processes. Under CFS bandwidth
-	// throttling that starves the runtime's timer servicing: the Temporal
-	// SDK's batched heartbeat-send timer (one wire send per ~48-60s window)
-	// fires late, the send is never attempted inside the server's margin,
-	// and a live container is declared dead.
-	//
-	// The ceil-rounding and floor-of-2 below reproduce Go 1.25+'s native
-	// container-aware formula, min(NumCPU, max(ceil(quota), 2))
-	// (runtime/cgroup_linux.go): GOMAXPROCS=2 for the 1-CPU grading quota.
-	// Upstream floors at 2 for GC and runtime progress headroom, and
-	// matching it keeps a future `go 1.25+` go.mod bump behavior-neutral.
-	// The native mechanism is gated on the go.mod language version, not the
-	// toolchain, and an explicit GOMAXPROCS pin disables its dynamic quota
-	// tracking, so this call is not redundant until the go directive moves to
-	// 1.25+ and this pin is removed with it. A pre-set GOMAXPROCS env var
-	// (for example baked into a course environment image) takes precedence
-	// over this pin; the boot line below exposes the effective value either
-	// way. Failure to detect the quota is non-fatal: the agent logs and runs
-	// with the default.
-	if _, err := maxprocs.Set(
-		maxprocs.Logger(func(format string, args ...interface{}) {
-			fmt.Fprintf(os.Stderr, "ghost agent: "+format+"\n", args...)
-		}),
-		maxprocs.RoundQuotaFunc(func(q float64) int { return int(math.Ceil(q)) }),
-		maxprocs.Min(2),
-	); err != nil {
+	// The agent's environment carries the run credentials. Running
+	// non-dumpable makes the agent's /proc/<pid>/environ, maps, and mem
+	// unreadable by the same-UID student processes, which can read /proc
+	// under Landlock. execve resets the flag, so exec children and the
+	// sampler's reads of their /proc entries are unaffected. Without this
+	// the credentials would be exposed, so a failure ends the run.
+	if err := disableDumpable(); err != nil {
+		return fmt.Errorf("agent: set non-dumpable: %w", err)
+	}
+	// The Go runtime's thread count follows the container's CPU quota rather
+	// than the node's core count. With the default, a throttled grading
+	// container (a 1-CPU quota on a node with many cores) starves the timer
+	// that sends the Temporal heartbeat and a live container is declared
+	// dead; cpuquota.PinGOMAXPROCS has the formula. An unreadable quota is
+	// non-fatal: the agent logs and runs with the default.
+	if err := cpuquota.PinGOMAXPROCS(func(format string, args ...any) {
+		fmt.Fprintf(os.Stderr, "ghost agent: "+format+"\n", args...)
+	}); err != nil {
 		fmt.Fprintf(os.Stderr, "ghost agent: maxprocs: %v (continuing with default GOMAXPROCS)\n", err)
 	}
-	// Boot forensics: one line that answers "what was the runtime actually
-	// configured as" for every future run (core backend/12 taught us this
-	// is the first question of any heartbeat investigation).
+	// One line recording the effective runtime configuration, the first
+	// question in any heartbeat investigation.
 	fmt.Fprintf(os.Stderr, "ghost agent: runtime GOMAXPROCS=%d NumCPU=%d\n",
 		runtime.GOMAXPROCS(0), runtime.NumCPU())
 
