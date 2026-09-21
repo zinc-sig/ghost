@@ -8,6 +8,47 @@ output cap, and the out-of-memory victim mark before `execve`; the agent
 itself is never sandboxed. The command reference is the agent section of
 `../../USAGE.md`.
 
+## Workspace staging
+
+`ghost-fetch-submission` builds the run workspace from the fetch input in a
+fixed order, and every attempt starts that order from the beginning, so a
+retried fetch never depends on what an earlier attempt left in the staging
+directory:
+
+1. Every `downloads` entry, in list order: the objects under the prefix are
+   mirrored into the target directory.
+2. The answer is set aside. When the input carries `answer`, the agent
+   lists the regular files directly under the workspace root whose name
+   minus its extension equals `stem` and moves the first in byte-wise name
+   order into a fresh staging session. No match leaves the answer step out
+   entirely, so a teacher stub at the target stays. Several matches are a
+   delivery shape only the student can produce, so the others stay at the
+   root and the agent logs their names.
+3. Every `objects` entry, in list order: the object is written to each of
+   its `target_paths` under the workspace root (directories 0755, files
+   0644). A later write replaces an earlier one at the same path, so a
+   teacher file overwrites a delivered file with the same name. A
+   delivered file where a parent directory must be, or a delivered
+   directory at the target, is removed first.
+4. The answer is placed at `target_path`, or back under its delivered root
+   name when `target_path` is empty, and wins its slot: a teacher object at
+   the same path is replaced, and a delivered file or directory in the way
+   is removed.
+
+The one failure that no rerun can fix is a teacher object standing in the
+answer's way: an object wrote a file below the answer's target, which makes
+the target a directory, or wrote a file where a parent directory of the
+target must be. The activity then fails with the non-retryable
+`GhostStagingInvalid` error and core reports a configuration failure of the
+marking scheme. Nothing in the student's delivery raises it.
+
+The set-aside and the placement cross filesystems when the staging
+directory is a tmpfs and the workspace a volume, so both fall back from a
+rename to a copy. A missing object key fails the activity before any of its
+targets is opened; a target that escapes the workspace or names the root
+fails it before anything is written. The result counts every written target
+as one file.
+
 ## Memory budgets and out-of-memory attribution
 
 An exec's `memory_limit_bytes` is a budget on the anonymous and shared
