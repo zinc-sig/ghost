@@ -27,6 +27,12 @@ type ObjectStore interface {
 	// targetDir, returning the number of files and total bytes written.
 	// Object keys that would escape targetDir are rejected.
 	DownloadPrefix(ctx context.Context, bucket, prefix, targetDir string) (files int, bytes int64, err error)
+	// DownloadObject writes the object at bucket/key to every path in
+	// dests, creating or truncating each with mode, and returns the
+	// object's size. The parent directories must exist. The key is checked
+	// before any destination is opened, so a missing key leaves no partial
+	// file behind.
+	DownloadObject(ctx context.Context, bucket, key string, dests []string, mode os.FileMode) (int64, error)
 }
 
 // minioStore is the production ObjectStore backed by minio-go.
@@ -134,6 +140,52 @@ func (s *minioStore) DownloadPrefix(ctx context.Context, bucket, prefix, targetD
 		total += n
 	}
 	return files, total, nil
+}
+
+func (s *minioStore) DownloadObject(ctx context.Context, bucket, key string, dests []string, mode os.FileMode) (int64, error) {
+	// Stat before opening any destination: GetObject is lazy and only
+	// reports a missing key on the first read, by which time the targets
+	// would already be truncated.
+	if _, err := s.client.StatObject(ctx, bucket, key, minio.StatObjectOptions{}); err != nil {
+		return 0, fmt.Errorf("agent: failed to stat %s/%s: %w", bucket, key, err)
+	}
+	r, err := s.client.GetObject(ctx, bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("agent: failed to get %s/%s: %w", bucket, key, err)
+	}
+	defer func() { _ = r.Close() }()
+	return writeObject(r, dests, mode)
+}
+
+// writeObject copies one object's content to every dests entry, each
+// created or truncated with mode, and returns the object's size. It is
+// shared by the real store and test fakes so both write the same way.
+func writeObject(r io.Reader, dests []string, mode os.FileMode) (n int64, err error) {
+	files := make([]*os.File, 0, len(dests))
+	writers := make([]io.Writer, 0, len(dests))
+	defer func() {
+		for _, f := range files {
+			if cerr := f.Close(); err == nil && cerr != nil {
+				err = fmt.Errorf("agent: failed to write %s: %w", f.Name(), cerr)
+			}
+		}
+	}()
+	for _, dest := range dests {
+		f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+		if err != nil {
+			return 0, fmt.Errorf("agent: failed to create %s: %w", dest, err)
+		}
+		files = append(files, f)
+		writers = append(writers, f)
+	}
+	if len(writers) == 0 {
+		return 0, nil
+	}
+	n, err = io.Copy(io.MultiWriter(writers...), r)
+	if err != nil {
+		return n, fmt.Errorf("agent: failed to copy object to %v: %w", dests, err)
+	}
+	return n, nil
 }
 
 // objectDestination maps an object key under prefix to a path inside

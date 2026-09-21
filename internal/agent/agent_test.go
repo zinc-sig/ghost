@@ -125,6 +125,16 @@ func (f *fakeStore) DownloadPrefix(_ context.Context, bucket, prefix, targetDir 
 	return files, total, nil
 }
 
+func (f *fakeStore) DownloadObject(_ context.Context, bucket, key string, dests []string, mode os.FileMode) (int64, error) {
+	f.mu.Lock()
+	data, ok := f.objects[bucket][key]
+	f.mu.Unlock()
+	if !ok {
+		return 0, fmt.Errorf("agent: failed to stat %s/%s: no such key", bucket, key)
+	}
+	return writeObject(bytes.NewReader(data), dests, mode)
+}
+
 func (f *fakeStore) upload(bucket, key string) ([]byte, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
