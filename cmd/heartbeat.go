@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/zinc-sig/ghost/internal/cpuquota"
 	"github.com/zinc-sig/ghost/internal/reaper"
 )
 
@@ -39,6 +40,13 @@ func init() {
 func heartbeatCommand(cmd *cobra.Command, args []string) error {
 	// Reap zombie children so fork bomb corpses free their PID slots promptly.
 	reaper.Start()
+
+	// The Go runtime's thread count follows the container's CPU quota so the
+	// keepalive takes few of the RLIMIT_NPROC slots it shares with the student
+	// command; see cpuquota.PinGOMAXPROCS. An unreadable quota leaves the default.
+	if err := cpuquota.PinGOMAXPROCS(nil); err != nil {
+		fmt.Fprintf(os.Stderr, "heartbeat: maxprocs: %v (continuing with default GOMAXPROCS)\n", err)
+	}
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
