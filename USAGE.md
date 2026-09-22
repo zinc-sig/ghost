@@ -176,7 +176,7 @@ ghost exec --landlock --workdir /workspace --max-pids=32 --oom-victim \
 ```
 
 Landlock filesystem rules:
-- **Read-only**: `/usr`, `/bin`, `/lib`, `/lib64`, `/etc`
+- **Read-only**: `/usr`, `/bin`, `/lib`, `/lib64`, `/etc`, `/opt`, `/proc`, `/sys/fs/cgroup`
 - **Read-write**: `/output`, `/tmp`, and `--workdir`
 
 ### Sandbox Isolation (legacy run)

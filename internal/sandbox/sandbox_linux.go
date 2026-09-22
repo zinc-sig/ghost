@@ -11,7 +11,7 @@ import (
 )
 
 // ApplySandbox applies the Landlock filesystem restrictions shared by exec
-// and supervise. Read-only: /usr, /bin, /lib, /lib64, /etc, /proc, and
+// and supervise. Read-only: /usr, /bin, /lib, /lib64, /etc, /opt, /proc, and
 // /sys/fs/cgroup, each ignored if missing. Read-write: /output, /tmp, /dev,
 // and the given work directory.
 func ApplySandbox(workDir string) error {
@@ -20,7 +20,11 @@ func ApplySandbox(workDir string) error {
 	}
 
 	rules := []landlock.Rule{
-		landlock.RODirs("/usr", "/bin", "/lib", "/lib64", "/etc").IgnoreIfMissing(),
+		// /opt is included because add-on toolchains install there under the
+		// FHS: the eclipse-temurin JDK images put javac and java at
+		// /opt/java/openjdk, so without it a Java compile or run is denied
+		// execute access.
+		landlock.RODirs("/usr", "/bin", "/lib", "/lib64", "/etc", "/opt").IgnoreIfMissing(),
 		// /proc and /sys/fs/cgroup are readable so a container-aware runtime
 		// such as the JVM finds its cgroup (through /proc/self/cgroup and
 		// /proc/self/mountinfo) and sizes its heap and threads to the
