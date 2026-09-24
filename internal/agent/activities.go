@@ -20,6 +20,7 @@ import (
 	"go.temporal.io/sdk/temporal"
 
 	"github.com/zinc-sig/ghost/internal/agent/contract"
+	"github.com/zinc-sig/ghost/internal/memwatch"
 	"github.com/zinc-sig/ghost/internal/reaper"
 )
 
@@ -48,13 +49,13 @@ type Activities struct {
 	store ObjectStore
 	// sampler is shared by every running exec: one goroutine enforces all
 	// memory budgets and sweeps escaped processes between execs.
-	sampler *memorySampler
+	sampler *memwatch.Sampler
 }
 
 // NewActivities builds the activity implementations from the agent
 // config and an object store (a fake in tests).
 func NewActivities(cfg *Config, store ObjectStore) *Activities {
-	return &Activities{cfg: cfg, store: store, sampler: newMemorySampler()}
+	return &Activities{cfg: cfg, store: store, sampler: memwatch.New()}
 }
 
 // workspaceObjectsVersion is the protocol version that introduced
@@ -527,7 +528,7 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 	// Start and register with the sampler in one step so the new process
 	// group is never visible to a sibling exec's orphan sweep before it is
 	// registered.
-	watch, err := a.sampler.startWatched(cmd, memoryLimit)
+	watch, err := a.sampler.StartWatched(cmd, memoryLimit)
 	if err != nil {
 		// Could not spawn: ExitCode stays null per the contract; no
 		// stdio was produced, so nothing is uploaded.
@@ -598,7 +599,7 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 		timer.Stop()
 		killProcessGroup(cmd)
 		<-waitCh
-		a.sampler.finish(watch)
+		a.sampler.Finish(watch)
 		finish()
 		return contract.ExecResult{}, ctx.Err()
 	}
@@ -615,16 +616,16 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 	// sample can attribute a kernel kill in the last tick and its sweep can
 	// remove any process that escaped the group. MemoryLimitExceeded is a
 	// result, not an error, like TimedOut.
-	mem := a.sampler.finish(watch)
-	res.MemoryLimitExceeded = mem.exceeded
-	res.PeakMemoryBytes = mem.peak
-	if mem.exceeded {
+	mem := a.sampler.Finish(watch)
+	res.MemoryLimitExceeded = mem.Exceeded
+	res.PeakMemoryBytes = mem.Peak
+	if mem.Exceeded {
 		logger.Info("run-exec memory limit exceeded", "stage", in.Stage, "scenario", in.ScenarioCode,
-			"killed_by", mem.reason, "limit_bytes", memoryLimit, "peak_bytes", mem.peak)
+			"killed_by", mem.Reason, "limit_bytes", memoryLimit, "peak_bytes", mem.Peak)
 	}
-	if len(mem.swept) > 0 {
+	if len(mem.Swept) > 0 {
 		logger.Warn("run-exec orphan sweep killed processes outside every running exec's group",
-			"stage", in.Stage, "scenario", in.ScenarioCode, "pids", mem.swept)
+			"stage", in.Stage, "scenario", in.ScenarioCode, "pids", mem.Swept)
 	}
 
 	var infraErrs []string

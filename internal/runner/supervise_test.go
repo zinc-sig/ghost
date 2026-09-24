@@ -243,3 +243,40 @@ func TestWriteTrailer_TightensPreexistingResultFile(t *testing.T) {
 		t.Errorf("trailer = %+v, want %+v", got, want)
 	}
 }
+
+func TestSuperviseMemoryBudgetKill(t *testing.T) {
+	dir := t.TempDir()
+	// Grow past the budget slowly enough for the 100ms sampler to see the
+	// tree over it, and cap the run so a missed kill fails fast.
+	cfg := superviseConfig(dir, "sh", "-c", `a=x; while :; do a="$a$a"; done`)
+	cfg.MaxMemoryBytes = 32 << 20
+	cfg.Timeout = 20 * time.Second
+	if err := Supervise(cfg); err != nil {
+		t.Fatalf("Supervise: %v", err)
+	}
+
+	tr := decodeResultFile(t, cfg.ResultFile)
+	if !tr.MemoryLimitExceeded {
+		t.Fatalf("memory_limit_exceeded = false, want true (exit_code %d, peak %d)", tr.ExitCode, tr.PeakMemoryB)
+	}
+	if tr.ExitCode != -1 {
+		t.Errorf("exit_code = %d, want -1 (killed)", tr.ExitCode)
+	}
+}
+
+func TestSuperviseMemoryBudgetUnderBudgetPasses(t *testing.T) {
+	dir := t.TempDir()
+	cfg := superviseConfig(dir, "sh", "-c", "echo ok")
+	cfg.MaxMemoryBytes = 256 << 20
+	if err := Supervise(cfg); err != nil {
+		t.Fatalf("Supervise: %v", err)
+	}
+
+	tr := decodeResultFile(t, cfg.ResultFile)
+	if tr.MemoryLimitExceeded {
+		t.Fatal("memory_limit_exceeded = true for a tiny command")
+	}
+	if tr.ExitCode != 0 {
+		t.Errorf("exit_code = %d, want 0", tr.ExitCode)
+	}
+}

@@ -1,4 +1,4 @@
-package agent
+package memwatch
 
 import (
 	"reflect"

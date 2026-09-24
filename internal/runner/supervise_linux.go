@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/zinc-sig/ghost/internal/cpuquota"
+	"github.com/zinc-sig/ghost/internal/memwatch"
 	"github.com/zinc-sig/ghost/internal/output"
 	"github.com/zinc-sig/ghost/internal/sandbox"
 )
@@ -86,7 +87,8 @@ func Supervise(config *Config) error {
 	// the whole process group.
 	if config.Landlock {
 		// Applied to the parent pre-fork and inherited by the child. The
-		// ruleset keeps /sys/fs/cgroup readable, which the sampler below needs.
+		// ruleset keeps /proc and /sys/fs/cgroup readable, which the peak
+		// sampler and the memory-budget sampler below need.
 		if err := sandbox.ApplySandbox(config.SandboxWorkDir); err != nil {
 			return fmt.Errorf("supervise: %w", err)
 		}
@@ -142,14 +144,37 @@ func Supervise(config *Config) error {
 		sampler.start()
 	}
 
+	// The memory budget is enforced on the child's process tree the same
+	// way the grading agent enforces it, so a Run's kill reads exactly like
+	// grading's. Start and registration are one step so the tree is watched
+	// from its first instruction.
+	var mem *memwatch.Sampler
+	var watch *memwatch.Watch
 	startTime := time.Now()
-	if err := cmd.Start(); err != nil {
+	if config.MaxMemoryBytes > 0 {
+		mem = memwatch.New()
+		var startErr error
+		watch, startErr = mem.StartWatched(cmd, config.MaxMemoryBytes)
+		if startErr != nil {
+			sampler.stop()
+			return fmt.Errorf("supervise: failed to start command: %w", startErr)
+		}
+	} else if err := cmd.Start(); err != nil {
 		sampler.stop()
 		return fmt.Errorf("supervise: failed to start command: %w", err)
 	}
 
 	waitErr := cmd.Wait()
 	duration := time.Since(startTime).Milliseconds()
+
+	var memExceeded bool
+	if mem != nil {
+		// The group may not be empty after the direct child exits; kill it
+		// before unregistering so the final sample still attributes a
+		// kernel kill and the sweep removes escapees.
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		memExceeded = mem.Finish(watch).Exceeded
+	}
 
 	sampled := sampler.stop()
 	watermark, _ := sandbox.ReadMemoryPeak()
@@ -161,12 +186,13 @@ func Supervise(config *Config) error {
 	}
 
 	trailer := output.Trailer{
-		Schema:      output.TrailerSchema,
-		ExitCode:    exitCodeFor(waitErr, timedOut.Load()),
-		PeakMemoryB: peak,
-		OOMKilled:   oomAfter > oomBefore,
-		Truncated:   budget.Truncated(),
-		DurationMs:  duration,
+		Schema:              output.TrailerSchema,
+		ExitCode:            exitCodeFor(waitErr, timedOut.Load()),
+		PeakMemoryB:         peak,
+		OOMKilled:           oomAfter > oomBefore,
+		MemoryLimitExceeded: memExceeded,
+		Truncated:           budget.Truncated(),
+		DurationMs:          duration,
 	}
 
 	return writeTrailer(config.ResultFile, trailer)

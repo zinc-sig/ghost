@@ -44,6 +44,7 @@ type Config struct {
 	MaxPids            uint64
 	SeccompProfileJSON string // Docker-format seccomp profile JSON (inline, single-sourced from core)
 	MaxOutputBytes     int64  // total /output byte cap for supervise mode
+	MaxMemoryBytes     int64  // per-exec memory budget for supervise mode; 0 = no enforcement
 	MaxFileBytes       int64  // per-file write cap (RLIMIT_FSIZE) for exec mode, not a shared total like supervise
 	OOMVictim          bool   // exec mode: raise oom_score_adj to 1000 before Landlock so the kernel picks the command tree over the agent
 	ResultFile         string // path the supervise trailer is written to
