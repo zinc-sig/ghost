@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -278,5 +280,57 @@ func TestSuperviseMemoryBudgetUnderBudgetPasses(t *testing.T) {
 	}
 	if tr.ExitCode != 0 {
 		t.Errorf("exit_code = %d, want 0", tr.ExitCode)
+	}
+}
+
+// TestSuperviseMemoryBudgetKillsLeftoverGroup asserts that with a budget
+// set, a process the command left running in its process group is killed
+// when the command exits (as the grading agent does), while without the
+// flag it survives, as before the budget existed.
+func TestSuperviseMemoryBudgetKillsLeftoverGroup(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		budget   int64
+		survives bool
+	}{
+		{"with a budget the leftover is killed", 256 << 20, false},
+		{"without a budget the leftover survives", 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			pidFile := filepath.Join(dir, "bg.pid")
+			// The leftover's stdio is detached so the command's exit is not held
+			// open by the capture pipe it would otherwise inherit.
+			cfg := superviseConfig(dir, "sh", "-c", fmt.Sprintf("sleep 30 </dev/null >/dev/null 2>&1 & echo $! > %s; exit 0", pidFile))
+			cfg.MaxMemoryBytes = tc.budget
+			if err := Supervise(cfg); err != nil {
+				t.Fatalf("Supervise: %v", err)
+			}
+			data, err := os.ReadFile(pidFile)
+			if err != nil {
+				t.Fatalf("read pid: %v", err)
+			}
+			var pid int
+			if _, err := fmt.Sscan(string(data), &pid); err != nil {
+				t.Fatalf("parse pid %q: %v", data, err)
+			}
+			t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+			// Reap-safe liveness: a killed child of a reparented group is
+			// gone or a zombie; kill -0 on a live process succeeds.
+			alive := func() bool {
+				if syscall.Kill(pid, 0) != nil {
+					return false
+				}
+				st, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+				return err == nil && !strings.Contains(string(st), ") Z ")
+			}
+			deadline := time.Now().Add(2 * time.Second)
+			for time.Now().Before(deadline) && alive() != tc.survives {
+				time.Sleep(20 * time.Millisecond)
+			}
+			if alive() != tc.survives {
+				t.Errorf("leftover alive = %v, want %v", alive(), tc.survives)
+			}
+		})
 	}
 }

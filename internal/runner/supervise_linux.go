@@ -144,10 +144,11 @@ func Supervise(config *Config) error {
 		sampler.start()
 	}
 
-	// The memory budget is enforced on the child's process tree the same
-	// way the grading agent enforces it, so a Run's kill reads exactly like
-	// grading's. Start and registration are one step so the tree is watched
-	// from its first instruction.
+	// The memory budget is enforced on the child's process group the same
+	// way the grading agent enforces it (a process that leaves the group
+	// with setsid is not budgeted; see the memwatch package). Start and
+	// registration are one step so the group is watched from its first
+	// instruction.
 	var mem *memwatch.Sampler
 	var watch *memwatch.Watch
 	startTime := time.Now()

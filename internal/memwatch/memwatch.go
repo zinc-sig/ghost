@@ -1,8 +1,12 @@
-// Package memwatch enforces per-exec memory budgets on process trees: a
-// sampler reads /proc, kills a watched group past its budget, attributes
-// kernel out-of-memory kills, and sweeps escapees. The agent watches every
-// concurrent exec with it and supervise watches its one child, so a
-// sandbox Run's budget kill reads exactly like a graded run's.
+// Package memwatch enforces per-exec memory budgets: a sampler reads /proc,
+// kills a watched process group past its budget, attributes kernel
+// out-of-memory kills, and sweeps escapees. The agent watches every
+// concurrent exec with it and supervise watches its one child, so a sandbox
+// Run and a graded run apply the same budget rule to the same process
+// group. The budget covers the group only: a process that leaves it with
+// setsid is not budgeted, and only the agent, as pid 1, can sweep it (see
+// the sweep); under supervise it is bounded by the container's memory cap
+// until core resets the executor.
 package memwatch
 
 import (
@@ -242,7 +246,9 @@ func attributeKernelKill(samples []attributionSample) []int {
 // are found by walking parent pids, which reaches a process that left its
 // group with setsid because such a process reparents to the agent when its
 // parent exits. As pid 1 the agent is every process's ancestor, so this is
-// every process in the container except the agent.
+// every process in the container except the agent. Supervise is not pid 1
+// (it runs through the container runtime's exec), so an escapee reparents to
+// the container's init instead and this sweep does not reach it.
 func (s *Sampler) sweepLocked() []int {
 	samples, err := snapshotProcs(s.procRoot)
 	if err != nil {
