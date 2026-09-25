@@ -71,11 +71,13 @@ not catch. Three layers keep a student memory burst from taking the agent
 down with it.
 
 1. **The sampler.** One goroutine, shared by every running exec, reads the
-   status of every process under `/proc` every 100 ms, groups processes by
-   `NSpgid`, and sums `RssAnon` plus `RssShmem` per registered exec. The
-   child is started with `Setpgid`, so its group id is its pid. When a sum
-   passes the budget the sampler confirms and then sends `SIGKILL` to the
-   group and flags the exec `memory_limit_exceeded`. The largest sum seen is
+   status of every process under `/proc` every 100 ms and sums `RssAnon`
+   plus `RssShmem` over each registered exec's members: the exec's root
+   process, every descendant of it by parent pid, and every process in its
+   group (`NSpgid`; the child is started with `Setpgid`, so its group id is
+   its pid). When a sum passes the budget the sampler confirms and then
+   sends `SIGKILL` to the group and to every member and flags the exec
+   `memory_limit_exceeded`. The largest sum seen is
    reported as `peak_memory_bytes`. The headroom between the summed budgets
    and the cap is the window in which this fires before the kernel does;
    under a fast burst the kernel path is the common one, so the sampler is
@@ -103,9 +105,8 @@ lapses, and core fails the run as an infrastructure failure.
 
 The sampler reads the cgroup's `oom_kill` counter from
 `/sys/fs/cgroup/memory.events` on every tick. When it rises between two
-ticks, the candidate is the exec whose process group lost a member in that
-tick. The candidate is flagged `memory_limit_exceeded`, and its group is
-killed, when its last sampled sum was at or over its budget, or when it was
+ticks, the candidate is the exec that lost a member in that tick. The
+candidate is flagged `memory_limit_exceeded`, and its members are killed, when its last sampled sum was at or over its budget, or when it was
 the only registered exec at that tick. Otherwise no flag is set and the exit
 code stands, because the kernel may have chosen that process for memory
 another exec or the agent allocated. When the counter is unreadable, as on
@@ -141,10 +142,20 @@ budget.
 ### Escaping the group and the sweep
 
 The seccomp allowlist permits `setsid` and `setpgid`, so a student process
-can leave its exec's group; the group kill at the end of the exec does not
-reach it. After each exec ends and its group is killed, the agent
-enumerates `/proc` and sends `SIGKILL` to every live descendant of the
-agent whose group is not that of a still-running exec. Descendants are found
+can leave its exec's group. Leaving the group does not leave the budget: a
+member is any descendant of the exec's root, so a child that called
+`setsid` while its parent chain to the root lives is still charged and
+killed with the exec. The one process the sampler cannot charge is an
+orphan in a group of its own: a descendant whose parent exited, which
+reparents to the agent and so is no longer a descendant of the root, and
+that also left the root's group. A double fork (the child forks the real
+worker into a new session and exits at once) produces exactly that, and
+such a worker is bounded only by the container cap while it runs. It is
+never charged to an exec by guesswork, because with concurrent execs the
+agent cannot tell whose it is. After each exec ends and its members are
+killed, the agent enumerates `/proc` and sends `SIGKILL` to every live
+descendant of the agent that is not a member of a still-running exec, which
+ends such a worker before the next stage. Descendants are found
 by walking parent pids: an escaped process reparents to the agent when its
 parent exits, because the agent is pid 1 in the container and sets itself
 as a child subreaper elsewhere. A child is started and registered under the

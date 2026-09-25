@@ -39,19 +39,29 @@ func TestParseProcStatus_GroupsByFirstNSpgidAndSumsResidentAnonAndShmem(t *testi
 // TestGroupByPgid_SumsMembersAndSkipsZombies asserts that a group's sum is
 // the RssAnon plus RssShmem of its live members only; charging a zombie
 // would keep a pid in the group after it died and mask a kernel kill.
-func TestGroupByPgid_SumsMembersAndSkipsZombies(t *testing.T) {
+// TestMembersOf_DescendantsAndGroup pins what the sampler charges to an
+// exec rooted at 100: the root, a child that left the group with setsid
+// (101, still a descendant) and that child's own child (104), and a group
+// member whose parent exited (102, reparented to pid 1 but still in group
+// 100). An orphan in a group of its own (103) is the documented gap and an
+// unrelated process (200) is not charged; a zombie member (105) holds no
+// memory and is left out.
+func TestMembersOf_DescendantsAndGroup(t *testing.T) {
 	samples := []procSample{
-		{pid: 10, ppid: 1, pgid: 10, rssAnon: 100, rssShmem: 10},
-		{pid: 11, ppid: 10, pgid: 10, rssAnon: 200, rssShmem: 20},
-		{pid: 12, ppid: 10, pgid: 10, zombie: true},
-		{pid: 20, ppid: 1, pgid: 20, rssAnon: 5},
+		{pid: 100, ppid: 1, pgid: 100, rssAnon: 1},
+		{pid: 101, ppid: 100, pgid: 101, rssAnon: 10},
+		{pid: 104, ppid: 101, pgid: 101, rssAnon: 100},
+		{pid: 102, ppid: 1, pgid: 100, rssShmem: 1000},
+		{pid: 103, ppid: 1, pgid: 103, rssAnon: 10000},
+		{pid: 200, ppid: 1, pgid: 200, rssAnon: 100000},
+		{pid: 105, ppid: 100, pgid: 100, zombie: true},
 	}
-	groups := groupByPgid(samples)
-	if g := groups[10]; g.sum != 330 || !reflect.DeepEqual(g.pids, []int{10, 11}) {
-		t.Errorf("group 10 = %+v, want sum 330 and pids [10 11]", g)
+	g := membersOf(100, samples, childrenOf(samples))
+	if want := []int{100, 101, 102, 104}; !reflect.DeepEqual(g.pids, want) {
+		t.Errorf("members = %v, want %v", g.pids, want)
 	}
-	if g := groups[20]; g.sum != 5 || !reflect.DeepEqual(g.pids, []int{20}) {
-		t.Errorf("group 20 = %+v, want sum 5 and pids [20]", g)
+	if g.sum != 1111 {
+		t.Errorf("sum = %d, want 1111", g.sum)
 	}
 }
 

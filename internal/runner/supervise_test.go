@@ -334,3 +334,58 @@ func TestSuperviseMemoryBudgetKillsLeftoverGroup(t *testing.T) {
 		})
 	}
 }
+
+// boundedGrowth grows a shell string to 2^27 bytes (well past a 32 MiB
+// budget) and then holds it, so the sampler sees it resident; the bound
+// keeps the test safe on a host without a container memory cap.
+const boundedGrowth = `a=x; i=0; while [ $i -lt 27 ]; do a="$a$a"; i=$((i+1)); done; sleep 3`
+
+// TestSuperviseMemoryBudgetCountsSetsidChild asserts a child that left the
+// command's process group with setsid, while its parent waits for it, is
+// still charged to the budget and killed: it is a descendant of the
+// command, whatever its group.
+func TestSuperviseMemoryBudgetCountsSetsidChild(t *testing.T) {
+	if _, err := exec.LookPath("setsid"); err != nil {
+		t.Skip("setsid not installed")
+	}
+	dir := t.TempDir()
+	cfg := superviseConfig(dir, "sh", "-c", fmt.Sprintf("setsid sh -c '%s' & wait", boundedGrowth))
+	cfg.MaxMemoryBytes = 32 << 20
+	cfg.Timeout = 20 * time.Second
+	if err := Supervise(cfg); err != nil {
+		t.Fatalf("Supervise: %v", err)
+	}
+	tr := decodeResultFile(t, cfg.ResultFile)
+	if !tr.MemoryLimitExceeded {
+		t.Fatalf("memory_limit_exceeded = false for a setsid child past the budget (exit %d)", tr.ExitCode)
+	}
+}
+
+// TestSuperviseMemoryBudgetOrphanInOwnGroupIsTheGap pins the documented
+// limit of the budget: a grandchild whose parent exited (so it is no longer
+// a descendant of the command) and that also left the command's group (so
+// it is no longer a group member) is not charged, and a command that only
+// waits for it passes unflagged. If this starts failing, the gap closed and
+// the memwatch package doc must say so.
+func TestSuperviseMemoryBudgetOrphanInOwnGroupIsTheGap(t *testing.T) {
+	if _, err := exec.LookPath("setsid"); err != nil {
+		t.Skip("setsid not installed")
+	}
+	dir := t.TempDir()
+	done := filepath.Join(dir, "done")
+	// The inner sh backgrounds the grower and exits at once, orphaning it
+	// in the new session setsid made; the command polls for it to finish.
+	script := fmt.Sprintf(`setsid sh -c '(%s; touch %s) &'; while [ ! -f %s ]; do sleep 0.1; done`,
+		strings.ReplaceAll(boundedGrowth, "'", `'"'"'`), done, done)
+	cfg := superviseConfig(dir, "sh", "-c", script)
+	cfg.MaxMemoryBytes = 32 << 20
+	cfg.Timeout = 30 * time.Second
+	if err := Supervise(cfg); err != nil {
+		t.Fatalf("Supervise: %v", err)
+	}
+	tr := decodeResultFile(t, cfg.ResultFile)
+	if tr.MemoryLimitExceeded || tr.ExitCode != 0 {
+		t.Fatalf("an orphan in its own group was charged (memory_limit_exceeded %v, exit %d); the documented gap changed",
+			tr.MemoryLimitExceeded, tr.ExitCode)
+	}
+}

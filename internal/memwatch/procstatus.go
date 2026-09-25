@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -23,7 +24,7 @@ type procSample struct {
 	rssShmem int64
 }
 
-// groupSample is the memory the sampler charges to one process group: the
+// groupSample is the memory the sampler charges to one watched exec: the
 // sum of RssAnon and RssShmem over its members, and the member pids.
 type groupSample struct {
 	sum  int64
@@ -120,20 +121,57 @@ func snapshotProcs(procRoot string) ([]procSample, error) {
 	return samples, nil
 }
 
-// groupByPgid sums the sampled memory of every process group. Zombies hold
-// no memory and are left out of the member lists.
-func groupByPgid(samples []procSample) map[int]groupSample {
-	groups := make(map[int]groupSample)
+// childrenOf indexes a snapshot by parent pid.
+func childrenOf(samples []procSample) map[int][]procSample {
+	children := make(map[int][]procSample, len(samples))
 	for _, s := range samples {
-		if s.zombie {
-			continue
+		children[s.ppid] = append(children[s.ppid], s)
+	}
+	return children
+}
+
+// membersOf sums the sampled memory charged to the exec rooted at root: the
+// root, every descendant of it by parent pid, and every process in the
+// root's process group (the exec is started as its own group, so the group
+// id is the root's pid). The descendant walk keeps a child that left the
+// group with setsid or setpgid while its parent is alive; the group keeps a
+// member whose parent exited and that was reparented, as long as it stayed
+// in the group. Zombies hold no memory and are left out of the member
+// list; pids are in ascending order.
+func membersOf(root int, samples []procSample, children map[int][]procSample) groupSample {
+	seen := map[int]bool{}
+	var g groupSample
+	add := func(s procSample) {
+		if seen[s.pid] {
+			return
 		}
-		g := groups[s.pgid]
+		seen[s.pid] = true
+		if s.zombie {
+			return
+		}
 		g.sum += s.rssAnon + s.rssShmem
 		g.pids = append(g.pids, s.pid)
-		groups[s.pgid] = g
 	}
-	return groups
+	for _, s := range samples {
+		if s.pid == root || s.pgid == root {
+			add(s)
+		}
+	}
+	queue := []int{root}
+	visited := map[int]bool{root: true}
+	for len(queue) > 0 {
+		parent := queue[0]
+		queue = queue[1:]
+		for _, c := range children[parent] {
+			add(c)
+			if !visited[c.pid] {
+				visited[c.pid] = true
+				queue = append(queue, c.pid)
+			}
+		}
+	}
+	sort.Ints(g.pids)
+	return g
 }
 
 // readPssBytes returns the proportional anonymous and shared memory of one
