@@ -66,7 +66,7 @@ Runs as PID 1 in a container, writing timestamps for liveness detection and reap
 ghost agent
 ```
 
-Runs ghost in agent mode (RFD 0015 grading runtime): a long-lived Temporal worker inside a grading container. The agent joins a per-run task queue and serves exactly two activities: `ghost-fetch-submission` (downloads the run's inputs into the workspace) and `ghost-run-exec` (runs one resolved exec spec). Each command is executed in a sandboxed **child** process via `ghost exec --landlock --workdir <wd> --max-pids=N --max-file-bytes=N --oom-victim`; the agent process itself is never sandboxed because Landlock and `RLIMIT_NPROC` are process-wide and irreversible. Per exec the agent applies the spec's timeout, its per-file output limit, and its memory budget (`memory_limit_bytes`, enforced on the exec's process group by a sampler; 0 means no per-exec budget), marks the child as the preferred out-of-memory victim, and reports the peak memory it sampled. The memory budgets section of `internal/agent/README.md` explains the layers and the attribution rule. Network isolation is the container/cluster's responsibility (egress NetworkPolicy), not ghost's. When the agent is PID 1 it also reaps zombies.
+Runs ghost in agent mode (RFD 0015 grading runtime): a long-lived Temporal worker inside a grading container. The agent joins a per-run task queue and serves exactly two activities: `ghost-fetch-submission` (stages the run's inputs in the workspace: the prefix downloads, then the teacher objects written over them, then the student's answer placed at the pipeline's submission path; the workspace staging section of `internal/agent/README.md` states the rules) and `ghost-run-exec` (runs one resolved exec spec). Each command is executed in a sandboxed **child** process via `ghost exec --landlock --workdir <wd> --max-pids=N --max-file-bytes=N --oom-victim`; the agent process itself is never sandboxed because Landlock and `RLIMIT_NPROC` are process-wide and irreversible. Per exec the agent applies the spec's timeout, its per-file output limit, and its memory budget (`memory_limit_bytes`, enforced on the exec's process group by a sampler; 0 means no per-exec budget), marks the child as the preferred out-of-memory victim, and reports the peak memory it sampled. The memory budgets section of `internal/agent/README.md` explains the layers and the attribution rule. Network isolation is the container/cluster's responsibility (egress NetworkPolicy), not ghost's. When the agent is PID 1 it also reaps zombies.
 
 The wire contract (activity names, payload shapes, protocol version) is frozen in `internal/agent/contract`. Agent mode has no flags; everything is configured through `GHOST_AGENT_*` environment variables injected by the runner backend at dispatch. The agent strips **every** `GHOST_AGENT_*` variable from the environment of the commands it spawns, so credentials never reach student code. The agent also runs non-dumpable, so its own `/proc/<pid>/environ` stays unreadable by student code even though the sandbox lets commands read `/proc`.
 
@@ -82,7 +82,7 @@ The wire contract (activity names, payload shapes, protocol version) is frozen i
 | `GHOST_AGENT_STORAGE_SESSION_TOKEN` | no | empty | STS session token (per-run credentials) |
 | `GHOST_AGENT_STORAGE_SECURE` | no | `false` | Use TLS for object storage |
 | `GHOST_AGENT_WORKDIR` | no | `/workspace` | Run workspace root; all relative paths in specs resolve against it |
-| `GHOST_AGENT_STAGING_DIR` | no | fresh 0700 temp dir | Agent-owned staging area for stdin materialisation and stdio captures (never world-writable) |
+| `GHOST_AGENT_STAGING_DIR` | no | fresh 0700 temp dir | Agent-owned staging area for stdin materialisation, stdio captures, and the answer set aside during fetch (never world-writable) |
 | `GHOST_AGENT_DEFAULT_TIMEOUT` | no | `60s` | Exec timeout when a spec's `timeout_ms` is 0 (Go duration) |
 | `GHOST_AGENT_MAX_PIDS` | no | `32` | `RLIMIT_NPROC` applied by the child before execve (0 disables) |
 | `GHOST_AGENT_SANDBOX` | no | `true` | When true, the child runs with `--landlock` (disable only where the kernel lacks Landlock support, e.g. tests) |
@@ -100,7 +100,7 @@ export GHOST_AGENT_STORAGE_SECRET_KEY=...
 ghost agent
 ```
 
-The agent runs until it receives SIGTERM/SIGINT, then drains in-flight activities gracefully. On a protocol version mismatch with core it fails activities with the non-retryable `GhostProtocolMismatch` error. Rebuild the environment image with a current ghost.
+The agent runs until it receives SIGTERM/SIGINT, then drains in-flight activities gracefully. It serves every protocol version from `MinProtocolVersion` to `ProtocolVersion` of `internal/agent/contract` and echoes the version core sent; a version outside that range, or an input that carries a field of a newer version, fails the activity with the non-retryable `GhostProtocolMismatch` error. Rebuild the environment image with a current ghost. A staging instruction the workspace cannot satisfy fails with the non-retryable `GhostStagingInvalid` error, which core reports as a configuration failure of the marking scheme: a write that would destroy a teacher file or directory, one object whose targets nest, or an object key that does not exist.
 
 ## Basic Usage
 

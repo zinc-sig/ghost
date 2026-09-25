@@ -19,6 +19,7 @@ var (
 	superviseWorkdir            string
 	superviseMaxPids            uint64
 	superviseMaxOutputBytes     int64
+	superviseMaxMemoryBytes     int64
 	superviseResultFile         string
 	superviseSeccompProfileJSON string
 )
@@ -71,6 +72,7 @@ func superviseCommand(cmd *cobra.Command, args []string) error {
 		SandboxWorkDir:     superviseWorkdir,
 		MaxPids:            superviseMaxPids,
 		MaxOutputBytes:     superviseMaxOutputBytes,
+		MaxMemoryBytes:     superviseMaxMemoryBytes,
 		ResultFile:         superviseResultFile,
 		SeccompProfileJSON: superviseSeccompProfileJSON,
 	}
@@ -90,6 +92,7 @@ func init() {
 	superviseCmd.Flags().BoolVar(&superviseLandlock, "landlock", false, "Apply Landlock filesystem restrictions before execution")
 	superviseCmd.Flags().StringVar(&superviseWorkdir, "workdir", "", "Working directory for Landlock read-write rules (defaults to current directory)")
 	superviseCmd.Flags().Uint64Var(&superviseMaxPids, "max-pids", 0, "Maximum number of processes for the current user (includes ghost itself; 0 = no limit)")
+	superviseCmd.Flags().Int64Var(&superviseMaxMemoryBytes, "max-memory-bytes", 0, "Memory budget in bytes for the command's process group; the group is killed past it and the trailer flags the kill, and any process still in the group when the command exits is killed (0 = no enforcement; a process that leaves the group with setsid is not budgeted)")
 	superviseCmd.Flags().Int64Var(&superviseMaxOutputBytes, "max-output-bytes", 1048576, "Total /output byte cap enforced as output is written")
 	superviseCmd.Flags().StringVar(&superviseResultFile, "result-file", "/output/.result", "Path the supervise result trailer is written to")
 	superviseCmd.Flags().StringVar(&superviseSeccompProfileJSON, "seccomp-profile-json", "", "Docker-format seccomp profile JSON applied to the command (inline, single-sourced from core)")

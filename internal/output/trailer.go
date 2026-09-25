@@ -20,8 +20,11 @@ type Trailer struct {
 	ExitCode    int   `json:"exit_code"`
 	PeakMemoryB int64 `json:"peak_memory_bytes"`
 	OOMKilled   bool  `json:"oom_killed"`
-	Truncated   bool  `json:"truncated"`
-	DurationMs  int64 `json:"duration_ms"`
+	// MemoryLimitExceeded reports the supervise memory-budget kill; absent
+	// on trailers from a ghost without the budget, which reads as false.
+	MemoryLimitExceeded bool  `json:"memory_limit_exceeded,omitempty"`
+	Truncated           bool  `json:"truncated"`
+	DurationMs          int64 `json:"duration_ms"`
 }
 
 // Result-stream frame sentinels. The frame lets a cluster backend (Kubernetes,

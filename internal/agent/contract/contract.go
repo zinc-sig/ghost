@@ -15,18 +15,43 @@ package contract
 
 import "time"
 
-// ProtocolVersion is carried on every activity input. The agent compares
-// it against its own compiled-in version and fails the activity with a
-// non-retryable ApplicationError of type ProtocolMismatchErrorType on any
-// difference. This surfaces "agent too old, rebuild the environment
-// image" at the readiness handshake instead of a confusing payload
-// decode error mid-run (RFD 0015 Decision 3).
-const ProtocolVersion = 2
+// ProtocolVersion is the newest protocol this contract describes and is
+// carried on every activity input. The agent accepts any version from
+// MinProtocolVersion to its own ProtocolVersion and echoes the version it
+// was sent; outside that range it fails the activity with a non-retryable
+// ApplicationError of type ProtocolMismatchErrorType, so a stale agent
+// surfaces as "agent too old, rebuild the environment image" at the
+// readiness handshake instead of as a payload decode error mid-run.
+//
+// Version 2 requires memory-budget enforcement and the concurrency setting
+// in EnvMaxConcurrentExecs, which the container memory cap depends on.
+// Version 3 adds FetchSubmissionInput.Objects and FetchSubmissionInput.Answer;
+// an input carrying either at version 2 is a mismatch. Core sends 3 only for
+// a run that uses them and 2 otherwise, so an agent built for 3 serves a
+// core still sending 2.
+const ProtocolVersion = 3
+
+// MinProtocolVersion is the oldest protocol the agent still serves. Core
+// sends it for a run that uses no version-3 field.
+const MinProtocolVersion = 2
 
 // ProtocolMismatchErrorType is the Temporal ApplicationError type the
 // agent uses for version-skew failures. Core treats it as terminal for
 // the run (non-retryable): retrying cannot fix a stale image.
 const ProtocolMismatchErrorType = "GhostProtocolMismatch"
+
+// StagingInvalidErrorType is the Temporal ApplicationError type the agent
+// uses when the workspace cannot be staged as instructed and a rerun cannot
+// fix it: a teacher file (an object, or a file mirrored from a mount) would
+// be destroyed by the answer or by an object, because it is a directory
+// holding a teacher file at the write's target or sits where the target
+// needs a directory; one object's targets nest (one is inside another); or
+// an object's key does not exist. Core treats it as a configuration failure
+// of the marking scheme and does not retry. Nothing the student delivers
+// raises it: a delivered file or directory in the way is removed, and
+// several delivered root files matching the stem are resolved by name
+// order.
+const StagingInvalidErrorType = "GhostStagingInvalid"
 
 // Activity names the agent registers on its per-run task queue and the
 // PipelineRunWorkflow schedules by name.
@@ -80,9 +105,24 @@ const (
 // FetchSubmissionInput asks the agent to download the run's inputs (the
 // student submission and the derived/config assets) into the run
 // workspace (RFD 0015 Decision 7: the agent fetches its own inputs).
+//
+// The agent stages the workspace in this order, on every attempt from
+// scratch: every Downloads entry in list order, then the answer is set
+// aside (see AnswerSpec), then every Objects entry in list order, then the
+// answer is placed. A later write replaces whatever an earlier one left at
+// the same path, so a teacher object overwrites a student-delivered file.
+// Objects and Answer require protocol 3; a version-2 input carries
+// neither.
 type FetchSubmissionInput struct {
 	ProtocolVersion int            `json:"protocol_version"`
 	Downloads       []DownloadSpec `json:"downloads"`
+	// Objects are single teacher-owned files written to one or more
+	// workspace paths after the prefix downloads.
+	Objects []ObjectSpec `json:"objects,omitempty"`
+	// Answer names the student's answer file and where it ends up. Present
+	// whenever the run carries Objects or a submission path, so the answer
+	// survives the object overlay.
+	Answer *AnswerSpec `json:"answer,omitempty"`
 }
 
 // DownloadSpec is one object-storage prefix to mirror into the
@@ -94,6 +134,41 @@ type DownloadSpec struct {
 	Prefix string `json:"prefix"`
 	// TargetDir is relative to the run workspace root; "." for the root.
 	TargetDir string `json:"target_dir"`
+}
+
+// ObjectSpec is one object-storage key written to every TargetPaths entry.
+// Each target is relative to the run workspace root and must resolve
+// inside it; the agent creates missing parent directories, and a file
+// where a parent directory must be or a directory at the target is
+// removed before the write. The object is fetched before any target is
+// prepared, so a missing key (StagingInvalidErrorType) changes nothing in
+// the workspace; two targets where one is inside the other, or a target
+// that would destroy a mounted teacher file, is StagingInvalidErrorType.
+type ObjectSpec struct {
+	Bucket      string   `json:"bucket"`
+	Key         string   `json:"key"`
+	TargetPaths []string `json:"target_paths"`
+}
+
+// AnswerSpec identifies the student's answer file among the downloaded
+// root files and says where the agent places it once the objects are
+// written. The answer is the regular file at the workspace root whose name
+// minus its extension equals Stem, read from the files the current attempt
+// downloaded, never from an earlier attempt. No match is a no-op (a teacher
+// stub at the target, if any, stays); when several root files match, the
+// first by byte-wise name order is the answer and the others stay where
+// they are, because only the student's delivery can produce that shape.
+// The answer is placed last and always wins its target: a teacher object
+// at the same path is replaced, and a student-delivered file or directory
+// in the way is removed. A teacher directory at the target (holding an
+// object's file or a file mirrored from a mount), or a teacher file where a
+// parent directory of the target must be, is StagingInvalidErrorType.
+type AnswerSpec struct {
+	Stem string `json:"stem"`
+	// TargetPath is relative to the run workspace root. Empty means the
+	// answer is restored under its original root name after the objects
+	// are written, so a teacher object with that name cannot replace it.
+	TargetPath string `json:"target_path"`
 }
 
 // FetchSubmissionResult reports the download outcome and completes the

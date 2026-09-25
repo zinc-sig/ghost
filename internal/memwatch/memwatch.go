@@ -1,4 +1,22 @@
-package agent
+// Package memwatch enforces per-exec memory budgets: a sampler reads /proc,
+// kills a watched exec past its budget, attributes kernel out-of-memory
+// kills, and sweeps escapees. The agent watches every concurrent exec with
+// it and supervise watches its one child, so a sandbox Run and a graded run
+// apply the same budget rule to the same processes.
+//
+// An exec's members are its root process, every descendant of the root,
+// and every process in the root's group, recomputed on every tick. A child
+// that leaves the group with setsid or setpgid is still a descendant and
+// stays budgeted while its parent chain to the root lives. The one process
+// the sampler cannot charge is an orphan in a group of its own: a
+// descendant whose parent exited (it is reparented to the agent, or under
+// supervise to the container's init) and that also left the exec's group.
+// Only the agent, as pid 1, sweeps such an orphan after the exec; under
+// supervise it is bounded by the container's memory cap until core resets
+// the executor. Orphans are never charged to an exec by guesswork, because
+// under supervise a leftover of an earlier exec would then count against
+// the next one.
+package memwatch
 
 import (
 	"os"
@@ -21,15 +39,15 @@ const sampleInterval = 100 * time.Millisecond
 // pages would otherwise pay a smaps_rollup walk on every tick.
 const confirmHysteresisTicks = 10
 
-// memorySampler enforces the per-exec memory budget for every running exec
+// Sampler enforces the per-exec memory budget for every running exec
 // from one goroutine, attributes kernel out-of-memory kills to the exec
 // that lost a process, and sweeps processes that escaped their exec's
 // process group. Registration is by process group, so the child must be
 // started with Setpgid. The goroutine starts with the first registered
 // exec and exits when the last one finishes. The reasoning behind the
 // budget, the confirmation, the attribution rule, and what the sampler
-// cannot see is in the memory budgets section of README.md.
-type memorySampler struct {
+// cannot see is in the memory budgets section of the agent README.
+type Sampler struct {
 	mu       sync.Mutex
 	procRoot string
 	selfPid  int
@@ -37,37 +55,38 @@ type memorySampler struct {
 	// counter is unreadable, which makes every comparison read as no kill.
 	readOOMKills func() int64
 
-	watches  map[int]*execWatch
+	watches  map[int]*Watch
 	running  bool
 	oomKills int64
 	oomKnown bool
 }
 
-// execWatch is the sampler's record of one registered exec.
-type execWatch struct {
+// Watch is the sampler's record of one registered exec. pgid is the root
+// process's pid, which is also its group id.
+type Watch struct {
 	pgid   int
 	budget int64
 	peak   int64
-	// prevSum and prevPids are the group as sampled at the previous tick;
-	// kernel kill attribution compares the current tick against them.
+	// prevSum and prevPids are the members as sampled at the previous
+	// tick; kernel kill attribution compares the current tick against them.
 	prevSum  int64
 	prevPids map[int]struct{}
 	// confirmSkip counts down the ticks left before the next Pss
 	// confirmation after a negative one.
 	confirmSkip int
 	exceeded    bool
-	// reason is "sampler" when the sampler killed the group past its
-	// budget and "kernel" when a cgroup kill was attributed to it.
+	// reason is "sampler" when the sampler killed the members past their
+	// budget and "kernel" when a cgroup kill was attributed to them.
 	reason string
 }
 
-// memoryOutcome is what RunExec records on the result for one exec.
-type memoryOutcome struct {
-	exceeded bool
-	reason   string
-	peak     int64
-	// swept lists the pids the orphan sweep killed after this exec.
-	swept []int
+// Outcome is what the caller records on the result for one exec.
+type Outcome struct {
+	Exceeded bool
+	Reason   string
+	Peak     int64
+	// Swept lists the pids the orphan sweep killed after this exec.
+	Swept []int
 }
 
 // attributionSample is one registered exec as seen by the attribution
@@ -78,27 +97,27 @@ type attributionSample struct {
 	budget  int64
 }
 
-func newMemorySampler() *memorySampler {
-	return &memorySampler{
+func New() *Sampler {
+	return &Sampler{
 		procRoot:     "/proc",
 		selfPid:      os.Getpid(),
 		readOOMKills: sandbox.ReadOOMKillCount,
-		watches:      make(map[int]*execWatch),
+		watches:      make(map[int]*Watch),
 	}
 }
 
-// startWatched starts cmd and registers its process group under the
-// sampler's lock, so a sweep triggered by a sibling exec cannot kill the
-// child between the start and the registration. A budget of 0 registers
-// the exec without enforcement; registration still protects the group
-// from the sweep and still measures its peak.
-func (s *memorySampler) startWatched(cmd *exec.Cmd, budget int64) (*execWatch, error) {
+// StartWatched starts cmd and registers it under the sampler's lock, so a
+// sweep triggered by a sibling exec cannot kill the child between the start
+// and the registration. The child must be started with Setpgid. A budget
+// of 0 registers the exec without enforcement; registration still protects
+// its members from the sweep and still measures its peak.
+func (s *Sampler) StartWatched(cmd *exec.Cmd, budget int64) (*Watch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	w := &execWatch{pgid: cmd.Process.Pid, budget: budget}
+	w := &Watch{pgid: cmd.Process.Pid, budget: budget}
 	s.watches[w.pgid] = w
 	if !s.running {
 		s.running = true
@@ -111,7 +130,7 @@ func (s *memorySampler) startWatched(cmd *exec.Cmd, budget int64) (*execWatch, e
 	return w, nil
 }
 
-func (s *memorySampler) loop() {
+func (s *Sampler) loop() {
 	ticker := time.NewTicker(sampleInterval)
 	defer ticker.Stop()
 	for range ticker.C {
@@ -126,35 +145,42 @@ func (s *memorySampler) loop() {
 	}
 }
 
-// finish takes one last sample so a kernel kill in the exec's final tick
-// is still attributed, unregisters the exec, and sweeps every process that
-// is not in a registered group. The caller has already killed the exec's
-// own group.
-func (s *memorySampler) finish(w *execWatch) memoryOutcome {
+// Finish takes one last sample so a kernel kill in the exec's final tick
+// is still attributed, kills the members that sample finds (a descendant
+// that left the group and outlived the root's wait), unregisters the exec,
+// and sweeps every process that is not a member of a registered exec. The
+// caller has already killed the exec's own group.
+func (s *Sampler) Finish(w *Watch) Outcome {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.sampleLocked()
+	members := s.sampleLocked()
+	killMembers(w.pgid, members[w.pgid].pids)
 	delete(s.watches, w.pgid)
-	return memoryOutcome{
-		exceeded: w.exceeded,
-		reason:   w.reason,
-		peak:     w.peak,
-		swept:    s.sweepLocked(),
+	return Outcome{
+		Exceeded: w.exceeded,
+		Reason:   w.reason,
+		Peak:     w.peak,
+		Swept:    s.sweepLocked(),
 	}
 }
 
 // sampleLocked runs one tick: kernel kill attribution against the previous
-// tick, then the budget check for every registered exec.
-func (s *memorySampler) sampleLocked() {
+// tick, then the budget check for every registered exec. It returns the
+// members of every registered exec keyed by the root's pid.
+func (s *Sampler) sampleLocked() map[int]groupSample {
 	kills := s.readOOMKills()
 	samples, err := snapshotProcs(s.procRoot)
 	if err != nil {
 		// Without /proc there is nothing to enforce or attribute; the
 		// peak stays 0.
 		s.oomKills, s.oomKnown = kills, true
-		return
+		return nil
 	}
-	groups := groupByPgid(samples)
+	children := childrenOf(samples)
+	groups := make(map[int]groupSample, len(s.watches))
+	for pgid := range s.watches {
+		groups[pgid] = membersOf(pgid, samples, children)
+	}
 
 	if s.oomKnown && kills > s.oomKills {
 		s.attributeLocked(groups)
@@ -171,7 +197,7 @@ func (s *memorySampler) sampleLocked() {
 				w.confirmSkip--
 			} else if confirmedGroupBytes(s.procRoot, g.pids) > w.budget {
 				w.exceeded, w.reason = true, "sampler"
-				killGroup(w.pgid)
+				killMembers(w.pgid, g.pids)
 			} else {
 				w.confirmSkip = confirmHysteresisTicks
 			}
@@ -182,13 +208,14 @@ func (s *memorySampler) sampleLocked() {
 			w.prevPids[pid] = struct{}{}
 		}
 	}
+	return groups
 }
 
 // attributeLocked flags the execs the attribution rule selects for a rise
-// of the oom_kill counter and kills their groups, so a kernel kill of a
+// of the oom_kill counter and kills their members, so a kernel kill of a
 // descendant ends the exec the same way a sampler kill does.
-func (s *memorySampler) attributeLocked(groups map[int]groupSample) {
-	watches := make([]*execWatch, 0, len(s.watches))
+func (s *Sampler) attributeLocked(groups map[int]groupSample) {
+	watches := make([]*Watch, 0, len(s.watches))
 	samples := make([]attributionSample, 0, len(s.watches))
 	for _, w := range s.watches {
 		lost := false
@@ -208,13 +235,13 @@ func (s *memorySampler) attributeLocked(groups map[int]groupSample) {
 			continue
 		}
 		w.exceeded, w.reason = true, "kernel"
-		killGroup(w.pgid)
+		killMembers(w.pgid, groups[w.pgid].pids)
 	}
 }
 
 // attributeKernelKill returns the indexes of the execs to flag when the
 // cgroup's oom_kill counter rose during a tick. A candidate is an exec
-// whose group lost a process in that tick. It is flagged when its last
+// whose members lost a process in that tick. It is flagged when its last
 // sampled sum was at or over its budget, or when it was the only
 // registered exec. Any other candidate keeps its exit code unflagged,
 // because the kernel may have chosen it for memory another exec, or the
@@ -232,20 +259,26 @@ func attributeKernelKill(samples []attributionSample) []int {
 	return flagged
 }
 
-// sweepLocked kills every live descendant of the agent whose process group
-// is not a registered exec, and returns the pids it signalled. Descendants
-// are found by walking parent pids, which reaches a process that left its
-// group with setsid because such a process reparents to the agent when its
-// parent exits. As pid 1 the agent is every process's ancestor, so this is
-// every process in the container except the agent.
-func (s *memorySampler) sweepLocked() []int {
+// sweepLocked kills every live descendant of the agent that is not a
+// member of a registered exec (see membersOf), and returns the pids it
+// signalled. Descendants are found by walking parent pids, which reaches a
+// process that left its group with setsid because such a process reparents
+// to the agent when its parent exits. As pid 1 the agent is every process's
+// ancestor, so this is every process in the container except the agent.
+// Supervise is not pid 1 (it runs through the container runtime's exec), so
+// an orphan reparents to the container's init instead and this sweep does
+// not reach it.
+func (s *Sampler) sweepLocked() []int {
 	samples, err := snapshotProcs(s.procRoot)
 	if err != nil {
 		return nil
 	}
-	children := make(map[int][]procSample)
-	for _, p := range samples {
-		children[p.ppid] = append(children[p.ppid], p)
+	children := childrenOf(samples)
+	protected := map[int]bool{}
+	for pgid := range s.watches {
+		for _, pid := range membersOf(pgid, samples, children).pids {
+			protected[pid] = true
+		}
 	}
 	var killed []int
 	queue := []int{s.selfPid}
@@ -255,6 +288,9 @@ func (s *memorySampler) sweepLocked() []int {
 		for _, p := range children[parent] {
 			queue = append(queue, p.pid)
 			if p.zombie {
+				continue
+			}
+			if protected[p.pid] {
 				continue
 			}
 			if _, registered := s.watches[p.pgid]; registered {
@@ -268,8 +304,14 @@ func (s *memorySampler) sweepLocked() []int {
 	return killed
 }
 
-func killGroup(pgid int) {
+// killMembers kills the exec's group, which also reaches a group member
+// spawned after the snapshot, and every member pid, which reaches a
+// descendant that left the group.
+func killMembers(pgid int, pids []int) {
 	_ = syscall.Kill(-pgid, syscall.SIGKILL)
+	for _, pid := range pids {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	}
 }
 
 func containsPid(pids []int, pid int) bool {

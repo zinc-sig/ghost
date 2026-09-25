@@ -8,6 +8,57 @@ output cap, and the out-of-memory victim mark before `execve`; the agent
 itself is never sandboxed. The command reference is the agent section of
 `../../USAGE.md`.
 
+## Workspace staging
+
+`ghost-fetch-submission` builds the run workspace from the fetch input in a
+fixed order, and every attempt starts that order from the beginning, so a
+retried fetch never depends on what an earlier attempt left in the staging
+directory:
+
+1. Every `downloads` entry, in list order: the objects under the prefix are
+   mirrored into the target directory. Each mirrored file replaces whatever
+   is at its path, a directory included, and a file where one of its parent
+   directories must be, so the last key listed wins a path and a retried
+   attempt rewrites the shape an earlier one left behind.
+2. The answer is set aside. When the input carries `answer`, the agent
+   lists the regular files directly under the workspace root whose name
+   minus its extension equals `stem`, among the root files this attempt's
+   delivery downloads wrote (the downloads whose `target_dir` is the root),
+   and moves the first in byte-wise name order into a fresh staging
+   session. A teacher file an earlier failed attempt left at the root is
+   never a candidate, even when its name matches the stem. No match leaves the answer step out
+   entirely, so a teacher stub at the target stays. Several matches are a
+   delivery shape only the student can produce, so the others stay at the
+   root and the agent logs their names.
+3. Every `objects` entry, in list order: the object is fetched into the
+   staging session, then written to each of its `target_paths` under the
+   workspace root (directories 0755, files 0644). A later write replaces an earlier one at the same path, so a
+   teacher file overwrites a delivered file with the same name. A
+   delivered file where a parent directory must be, or a delivered
+   directory at the target, is removed first.
+4. The answer is placed at `target_path`, or back under its delivered root
+   name when `target_path` is empty, and wins its slot: a teacher object at
+   the same path is replaced, and a delivered file or directory in the way
+   is removed.
+
+Teacher files are protected: a write that would destroy one is a failure
+no rerun can fix. That covers the answer or an object landing on a
+directory that holds a teacher file (an object's, or one mirrored from a
+mount), or needing a directory where a teacher file sits; one object whose
+targets nest; and an object key that does not exist. The activity then
+fails with the non-retryable `GhostStagingInvalid` error, before the
+offending write, and core reports a configuration failure of the marking
+scheme. Replacing one teacher file at its exact path is not a failure: a
+later object wins, and the answer always wins its target. Nothing in the
+student's delivery raises the error.
+
+The set-aside and the placement cross filesystems when the staging
+directory is a tmpfs and the workspace a volume, so both fall back from a
+rename to a copy. A missing object key fails the activity before any of its
+targets is prepared; a target that escapes the workspace or names the root
+fails it before anything is written. The result counts every written target
+as one file.
+
 ## Memory budgets and out-of-memory attribution
 
 An exec's `memory_limit_bytes` is a budget on the anonymous and shared
@@ -20,11 +71,13 @@ not catch. Three layers keep a student memory burst from taking the agent
 down with it.
 
 1. **The sampler.** One goroutine, shared by every running exec, reads the
-   status of every process under `/proc` every 100 ms, groups processes by
-   `NSpgid`, and sums `RssAnon` plus `RssShmem` per registered exec. The
-   child is started with `Setpgid`, so its group id is its pid. When a sum
-   passes the budget the sampler confirms and then sends `SIGKILL` to the
-   group and flags the exec `memory_limit_exceeded`. The largest sum seen is
+   status of every process under `/proc` every 100 ms and sums `RssAnon`
+   plus `RssShmem` over each registered exec's members: the exec's root
+   process, every descendant of it by parent pid, and every process in its
+   group (`NSpgid`; the child is started with `Setpgid`, so its group id is
+   its pid). When a sum passes the budget the sampler confirms and then
+   sends `SIGKILL` to the group and to every member and flags the exec
+   `memory_limit_exceeded`. The largest sum seen is
    reported as `peak_memory_bytes`. The headroom between the summed budgets
    and the cap is the window in which this fires before the kernel does;
    under a fast burst the kernel path is the common one, so the sampler is
@@ -52,9 +105,8 @@ lapses, and core fails the run as an infrastructure failure.
 
 The sampler reads the cgroup's `oom_kill` counter from
 `/sys/fs/cgroup/memory.events` on every tick. When it rises between two
-ticks, the candidate is the exec whose process group lost a member in that
-tick. The candidate is flagged `memory_limit_exceeded`, and its group is
-killed, when its last sampled sum was at or over its budget, or when it was
+ticks, the candidate is the exec that lost a member in that tick. The
+candidate is flagged `memory_limit_exceeded`, and its members are killed, when its last sampled sum was at or over its budget, or when it was
 the only registered exec at that tick. Otherwise no flag is set and the exit
 code stands, because the kernel may have chosen that process for memory
 another exec or the agent allocated. When the counter is unreadable, as on
@@ -90,10 +142,20 @@ budget.
 ### Escaping the group and the sweep
 
 The seccomp allowlist permits `setsid` and `setpgid`, so a student process
-can leave its exec's group; the group kill at the end of the exec does not
-reach it. After each exec ends and its group is killed, the agent
-enumerates `/proc` and sends `SIGKILL` to every live descendant of the
-agent whose group is not that of a still-running exec. Descendants are found
+can leave its exec's group. Leaving the group does not leave the budget: a
+member is any descendant of the exec's root, so a child that called
+`setsid` while its parent chain to the root lives is still charged and
+killed with the exec. The one process the sampler cannot charge is an
+orphan in a group of its own: a descendant whose parent exited, which
+reparents to the agent and so is no longer a descendant of the root, and
+that also left the root's group. A double fork (the child forks the real
+worker into a new session and exits at once) produces exactly that, and
+such a worker is bounded only by the container cap while it runs. It is
+never charged to an exec by guesswork, because with concurrent execs the
+agent cannot tell whose it is. After each exec ends and its members are
+killed, the agent enumerates `/proc` and sends `SIGKILL` to every live
+descendant of the agent that is not a member of a still-running exec, which
+ends such a worker before the next stage. Descendants are found
 by walking parent pids: an escaped process reparents to the agent when its
 parent exits, because the agent is pid 1 in the container and sets itself
 as a child subreaper elsewhere. A child is started and registered under the

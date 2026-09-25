@@ -27,6 +27,11 @@ func canonicalFetchInput() FetchSubmissionInput {
 			{Bucket: "course-1", Prefix: "submissions/42/", TargetDir: "."},
 			{Bucket: "course-1", Prefix: "exams/7/marking-scheme/expected/", TargetDir: "expected"},
 		},
+		Objects: []ObjectSpec{
+			{Bucket: "course-1", Key: "exams/7/marking-scheme-asset/q_java/v1/src/main/java/app/Main.java", TargetPaths: []string{"src/main/java/app/Main.java"}},
+			{Bucket: "course-1", Key: "exams/7/marking-scheme-asset/q_java/v1/pom.xml", TargetPaths: []string{"pom.xml", "examination-assets/q_java/pom.xml"}},
+		},
+		Answer: &AnswerSpec{Stem: "q_java", TargetPath: "src/main/java/app/Solution.java"},
 	}
 }
 
@@ -109,7 +114,19 @@ func TestWireEncodingFrozen(t *testing.T) {
 }
 
 func TestWireDecodingRoundTrips(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("testdata", "run_exec_input.golden.json"))
+	raw, err := os.ReadFile(filepath.Join("testdata", "fetch_submission_input.golden.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fetch FetchSubmissionInput
+	if err := json.Unmarshal(raw, &fetch); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(canonicalFetchInput(), fetch) {
+		t.Errorf("FetchSubmissionInput round-trip mismatch: %+v", fetch)
+	}
+
+	raw, err = os.ReadFile(filepath.Join("testdata", "run_exec_input.golden.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
