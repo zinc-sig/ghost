@@ -144,9 +144,9 @@ func Supervise(config *Config) error {
 		sampler.start()
 	}
 
-	// The memory budget is enforced on the child's process group the same
-	// way the grading agent enforces it (a process that leaves the group
-	// with setsid is not budgeted; see the memwatch package). Start and
+	// The memory budget is enforced on the child's members the same way the
+	// grading agent enforces it, and additionally on every process
+	// reparented to this supervise (see the memwatch package). Start and
 	// registration are one step so the group is watched from its first
 	// instruction.
 	var mem *memwatch.Sampler
@@ -154,6 +154,12 @@ func Supervise(config *Config) error {
 	startTime := time.Now()
 	if config.MaxMemoryBytes > 0 {
 		mem = memwatch.New()
+		// This supervise serves one exec, so every process it ends up
+		// holding is that exec's, including an orphan a double fork put in
+		// a session of its own.
+		if err := mem.EnableSubreaper(); err != nil {
+			fmt.Fprintf(os.Stderr, "ghost supervise: child subreaper: %v (continuing; an orphan in a session of its own is not budgeted)\n", err)
+		}
 		var startErr error
 		watch, startErr = mem.StartWatched(cmd, config.MaxMemoryBytes)
 		if startErr != nil {

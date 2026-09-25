@@ -163,6 +163,12 @@ sampler's lock so a sibling's sweep cannot kill it before it is registered.
 The pids killed are logged. When the agent is not pid 1 a swept process
 stays a zombie of the agent, because only pid 1 runs the reaper.
 
+`ghost supervise` closes the gap for the one exec it serves: with a memory
+budget it makes itself a child subreaper, so an orphan is reparented to it
+rather than to the container's init, and it charges every descendant of
+itself to that exec. It reaps the orphans that exit on `SIGCHLD`, because a
+zombie counts against the task cap until it is reaped.
+
 ### The agent's own memory
 
 The agent shares the container cap with the student processes. Core sizes

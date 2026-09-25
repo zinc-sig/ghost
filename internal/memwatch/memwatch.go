@@ -7,25 +7,26 @@
 // An exec's members are its root process, every descendant of the root,
 // and every process in the root's group, recomputed on every tick. A child
 // that leaves the group with setsid or setpgid is still a descendant and
-// stays budgeted while its parent chain to the root lives. The one process
-// the sampler cannot charge is an orphan in a group of its own: a
-// descendant whose parent exited (it is reparented to the agent, or under
-// supervise to the container's init) and that also left the exec's group.
-// Only the agent, as pid 1, sweeps such an orphan after the exec; under
-// supervise it is bounded by the container's memory cap until core resets
-// the executor. Orphans are never charged to an exec by guesswork, because
-// under supervise a leftover of an earlier exec would then count against
-// the next one.
+// stays budgeted while its parent chain to the root lives. An orphan in a
+// group of its own (a descendant whose parent exited and that also left the
+// exec's group, as a double fork into a new session makes) is charged only
+// under supervise: supervise serves one exec and is a child subreaper (see
+// EnableSubreaper), so the orphan is reparented to it and every descendant
+// of it is that exec's. The agent serves concurrent execs and cannot tell
+// whose such an orphan is, so it does not charge it and sweeps it after the
+// exec instead.
 package memwatch
 
 import (
 	"os"
 	"os/exec"
+	"os/signal"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/zinc-sig/ghost/internal/sandbox"
+	"golang.org/x/sys/unix"
 )
 
 // sampleInterval is the cadence at which the sampler reads /proc. One read
@@ -59,6 +60,94 @@ type Sampler struct {
 	running  bool
 	oomKills int64
 	oomKnown bool
+
+	// subreaper is set by EnableSubreaper: this process is a child
+	// subreaper serving exactly one exec, so every descendant of it is that
+	// exec's (see EnableSubreaper).
+	subreaper bool
+	// reapStop ends the goroutine that reaps orphans on SIGCHLD, and
+	// reapDone is closed when it has ended.
+	reapStop chan struct{}
+	reapDone chan struct{}
+}
+
+// maxSweepPasses bounds the final sweep of a subreaper: each pass kills
+// the descendants one snapshot shows, and a process forking in a loop can
+// add a child between the snapshot and the kill, so passes repeat until
+// one finds nothing.
+const maxSweepPasses = 50
+
+// EnableSubreaper makes this process a child subreaper, so a descendant
+// whose parent exits is reparented to it instead of to the container's
+// init, and charges every descendant of it to the one registered exec. It
+// is for a process that serves exactly one exec and is created for it
+// (supervise): nothing but that exec can have put a process under it, so
+// the attribution needs no guess, and an orphan in a group of its own (a
+// double fork into a new session) stays charged and is swept. The agent
+// must not use it: it serves concurrent execs and cannot tell whose an
+// orphan is. Orphans that exit are reaped on SIGCHLD, as an init does,
+// because a zombie counts against the task cap until it is reaped and a
+// command that spawns short-lived detached processes quickly would
+// otherwise exhaust the cap between two ticks. Finish ends the reaping.
+func (s *Sampler) EnableSubreaper() error {
+	if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); err != nil {
+		return err
+	}
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGCHLD)
+	s.mu.Lock()
+	s.subreaper = true
+	s.reapStop = make(chan struct{})
+	s.reapDone = make(chan struct{})
+	s.mu.Unlock()
+	go s.reapLoop(sigs)
+	return nil
+}
+
+func (s *Sampler) reapLoop(sigs chan os.Signal) {
+	defer close(s.reapDone)
+	defer signal.Stop(sigs)
+	for {
+		select {
+		case <-s.reapStop:
+			return
+		case <-sigs:
+			s.reapExited()
+		}
+	}
+}
+
+// reapExited reaps exited children of this process until none is left or
+// the next one is a registered exec's root, which is left for os/exec's
+// Wait and is reaped by it at once; the tick reaps whatever that leaves.
+func (s *Sampler) reapExited() {
+	for {
+		pid := peekExited()
+		if pid <= 0 {
+			return
+		}
+		s.mu.Lock()
+		_, root := s.watches[pid]
+		s.mu.Unlock()
+		if root {
+			return
+		}
+		var ws syscall.WaitStatus
+		if got, _ := syscall.Wait4(pid, &ws, syscall.WNOHANG, nil); got != pid {
+			return
+		}
+	}
+}
+
+// stopReaper ends the SIGCHLD reaping goroutine, if one runs. It must be
+// called without the lock held, since the goroutine takes it.
+func (s *Sampler) stopReaper() {
+	if s.reapStop == nil {
+		return
+	}
+	close(s.reapStop)
+	<-s.reapDone
+	s.reapStop = nil
 }
 
 // Watch is the sampler's record of one registered exec. pgid is the root
@@ -151,16 +240,28 @@ func (s *Sampler) loop() {
 // and sweeps every process that is not a member of a registered exec. The
 // caller has already killed the exec's own group.
 func (s *Sampler) Finish(w *Watch) Outcome {
+	defer s.stopReaper()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	members := s.sampleLocked()
 	killMembers(w.pgid, members[w.pgid].pids)
 	delete(s.watches, w.pgid)
+	swept := s.sweepLocked()
+	if s.subreaper {
+		for pass := 1; pass < maxSweepPasses; pass++ {
+			more := s.sweepLocked()
+			if len(more) == 0 {
+				break
+			}
+			swept = append(swept, more...)
+		}
+		reapAll()
+	}
 	return Outcome{
 		Exceeded: w.exceeded,
 		Reason:   w.reason,
 		Peak:     w.peak,
-		Swept:    s.sweepLocked(),
+		Swept:    swept,
 	}
 }
 
@@ -180,6 +281,12 @@ func (s *Sampler) sampleLocked() map[int]groupSample {
 	groups := make(map[int]groupSample, len(s.watches))
 	for pgid := range s.watches {
 		groups[pgid] = membersOf(pgid, samples, children)
+		if s.subreaper && len(s.watches) == 1 {
+			groups[pgid] = withDescendants(groups[pgid], s.selfPid, children)
+		}
+	}
+	if s.subreaper {
+		s.reapOrphansLocked(samples)
 	}
 
 	if s.oomKnown && kills > s.oomKills {
@@ -265,9 +372,10 @@ func attributeKernelKill(samples []attributionSample) []int {
 // process that left its group with setsid because such a process reparents
 // to the agent when its parent exits. As pid 1 the agent is every process's
 // ancestor, so this is every process in the container except the agent.
-// Supervise is not pid 1 (it runs through the container runtime's exec), so
-// an orphan reparents to the container's init instead and this sweep does
-// not reach it.
+// Supervise is not pid 1 (it runs through the container runtime's exec);
+// with EnableSubreaper an orphan still reparents to it, and without it the
+// orphan reparents to the container's init and this sweep does not reach
+// it.
 func (s *Sampler) sweepLocked() []int {
 	samples, err := snapshotProcs(s.procRoot)
 	if err != nil {
@@ -302,6 +410,35 @@ func (s *Sampler) sweepLocked() []int {
 		}
 	}
 	return killed
+}
+
+// reapOrphansLocked reaps every zombie child of this process that is not
+// a registered exec's root: an orphan reparented to the subreaper that
+// exited. A root is left for os/exec's Wait, which would otherwise see
+// ECHILD, so reaping is by exact pid, never wait4(-1).
+func (s *Sampler) reapOrphansLocked(samples []procSample) {
+	for _, p := range samples {
+		if p.ppid != s.selfPid || !p.zombie {
+			continue
+		}
+		if _, root := s.watches[p.pid]; root {
+			continue
+		}
+		var ws syscall.WaitStatus
+		_, _ = syscall.Wait4(p.pid, &ws, syscall.WNOHANG, nil)
+	}
+}
+
+// reapAll reaps every exited child. It runs only after the exec's root was
+// waited for, so no one else is waiting on a child.
+func reapAll() {
+	for {
+		var ws syscall.WaitStatus
+		pid, err := syscall.Wait4(-1, &ws, syscall.WNOHANG, nil)
+		if pid <= 0 || err != nil {
+			return
+		}
+	}
 }
 
 // killMembers kills the exec's group, which also reaches a group member

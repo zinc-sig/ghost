@@ -121,6 +121,37 @@ func snapshotProcs(procRoot string) ([]procSample, error) {
 	return samples, nil
 }
 
+// withDescendants adds to g every non-zombie descendant of ancestor (the
+// ancestor itself excluded) that g does not already hold, keeping pids in
+// ascending order.
+func withDescendants(g groupSample, ancestor int, children map[int][]procSample) groupSample {
+	seen := make(map[int]bool, len(g.pids))
+	for _, pid := range g.pids {
+		seen[pid] = true
+	}
+	out := groupSample{sum: g.sum, pids: append([]int(nil), g.pids...)}
+	queue := []int{ancestor}
+	visited := map[int]bool{ancestor: true}
+	for len(queue) > 0 {
+		parent := queue[0]
+		queue = queue[1:]
+		for _, c := range children[parent] {
+			if !visited[c.pid] {
+				visited[c.pid] = true
+				queue = append(queue, c.pid)
+			}
+			if seen[c.pid] || c.zombie {
+				continue
+			}
+			seen[c.pid] = true
+			out.sum += c.rssAnon + c.rssShmem
+			out.pids = append(out.pids, c.pid)
+		}
+	}
+	sort.Ints(out.pids)
+	return out
+}
+
 // childrenOf indexes a snapshot by parent pid.
 func childrenOf(samples []procSample) map[int][]procSample {
 	children := make(map[int][]procSample, len(samples))

@@ -43,7 +43,7 @@ func TestParseProcStatus_GroupsByFirstNSpgidAndSumsResidentAnonAndShmem(t *testi
 // exec rooted at 100: the root, a child that left the group with setsid
 // (101, still a descendant) and that child's own child (104), and a group
 // member whose parent exited (102, reparented to pid 1 but still in group
-// 100). An orphan in a group of its own (103) is the documented gap and an
+// 100). An orphan in a group of its own (103) is not a member and an
 // unrelated process (200) is not charged; a zombie member (105) holds no
 // memory and is left out.
 func TestMembersOf_DescendantsAndGroup(t *testing.T) {

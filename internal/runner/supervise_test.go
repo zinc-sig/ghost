@@ -360,32 +360,3 @@ func TestSuperviseMemoryBudgetCountsSetsidChild(t *testing.T) {
 		t.Fatalf("memory_limit_exceeded = false for a setsid child past the budget (exit %d)", tr.ExitCode)
 	}
 }
-
-// TestSuperviseMemoryBudgetOrphanInOwnGroupIsTheGap pins the documented
-// limit of the budget: a grandchild whose parent exited (so it is no longer
-// a descendant of the command) and that also left the command's group (so
-// it is no longer a group member) is not charged, and a command that only
-// waits for it passes unflagged. If this starts failing, the gap closed and
-// the memwatch package doc must say so.
-func TestSuperviseMemoryBudgetOrphanInOwnGroupIsTheGap(t *testing.T) {
-	if _, err := exec.LookPath("setsid"); err != nil {
-		t.Skip("setsid not installed")
-	}
-	dir := t.TempDir()
-	done := filepath.Join(dir, "done")
-	// The inner sh backgrounds the grower and exits at once, orphaning it
-	// in the new session setsid made; the command polls for it to finish.
-	script := fmt.Sprintf(`setsid sh -c '(%s; touch %s) &'; while [ ! -f %s ]; do sleep 0.1; done`,
-		strings.ReplaceAll(boundedGrowth, "'", `'"'"'`), done, done)
-	cfg := superviseConfig(dir, "sh", "-c", script)
-	cfg.MaxMemoryBytes = 32 << 20
-	cfg.Timeout = 30 * time.Second
-	if err := Supervise(cfg); err != nil {
-		t.Fatalf("Supervise: %v", err)
-	}
-	tr := decodeResultFile(t, cfg.ResultFile)
-	if tr.MemoryLimitExceeded || tr.ExitCode != 0 {
-		t.Fatalf("an orphan in its own group was charged (memory_limit_exceeded %v, exit %d); the documented gap changed",
-			tr.MemoryLimitExceeded, tr.ExitCode)
-	}
-}
