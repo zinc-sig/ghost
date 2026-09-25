@@ -100,7 +100,7 @@ export GHOST_AGENT_STORAGE_SECRET_KEY=...
 ghost agent
 ```
 
-The agent runs until it receives SIGTERM/SIGINT, then drains in-flight activities gracefully. It serves every protocol version from `MinProtocolVersion` to `ProtocolVersion` of `internal/agent/contract` and echoes the version core sent; a version outside that range, or an input that carries a field of a newer version, fails the activity with the non-retryable `GhostProtocolMismatch` error. Rebuild the environment image with a current ghost. A teacher object standing in the answer's way at fetch time fails with the non-retryable `GhostStagingInvalid` error, which core reports as a configuration failure of the marking scheme.
+The agent runs until it receives SIGTERM/SIGINT, then drains in-flight activities gracefully. It serves every protocol version from `MinProtocolVersion` to `ProtocolVersion` of `internal/agent/contract` and echoes the version core sent; a version outside that range, or an input that carries a field of a newer version, fails the activity with the non-retryable `GhostProtocolMismatch` error. Rebuild the environment image with a current ghost. A staging instruction the workspace cannot satisfy fails with the non-retryable `GhostStagingInvalid` error, which core reports as a configuration failure of the marking scheme: a write that would destroy a teacher file or directory, one object whose targets nest, or an object key that does not exist.
 
 ## Basic Usage
 

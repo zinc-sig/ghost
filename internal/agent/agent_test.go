@@ -68,6 +68,9 @@ type fakeStore struct {
 	objects   map[string]map[string][]byte // bucket -> key -> data
 	uploads   map[string][]byte            // "bucket/key" -> data
 	uploadErr error
+	// objectErrOnce makes the next DownloadObject of "bucket/key" fail
+	// with the given error once, the shape of a transient store failure.
+	objectErrOnce map[string]error
 }
 
 func newFakeStore() *fakeStore {
@@ -101,7 +104,7 @@ func (f *fakeStore) UploadBytes(_ context.Context, bucket, key string, data []by
 	return nil
 }
 
-func (f *fakeStore) DownloadPrefix(_ context.Context, bucket, prefix, targetDir string) (int, int64, error) {
+func (f *fakeStore) DownloadPrefix(_ context.Context, bucket, prefix, targetDir string) ([]string, int64, error) {
 	f.mu.Lock()
 	keys := make([]string, 0)
 	for key := range f.objects[bucket] {
@@ -112,25 +115,30 @@ func (f *fakeStore) DownloadPrefix(_ context.Context, bucket, prefix, targetDir 
 	f.mu.Unlock()
 	sort.Strings(keys)
 
-	files := 0
+	var written []string
 	var total int64
 	for _, key := range keys {
-		n, err := materializeObject(targetDir, prefix, key, bytes.NewReader(f.objects[bucket][key]))
+		dest, n, err := materializeObject(targetDir, prefix, key, bytes.NewReader(f.objects[bucket][key]))
 		if err != nil {
-			return files, total, err
+			return written, total, err
 		}
-		files++
+		written = append(written, dest)
 		total += n
 	}
-	return files, total, nil
+	return written, total, nil
 }
 
 func (f *fakeStore) DownloadObject(_ context.Context, bucket, key string, dests []string, mode os.FileMode) (int64, error) {
 	f.mu.Lock()
 	data, ok := f.objects[bucket][key]
+	injected := f.objectErrOnce[bucket+"/"+key]
+	delete(f.objectErrOnce, bucket+"/"+key)
 	f.mu.Unlock()
+	if injected != nil {
+		return 0, injected
+	}
 	if !ok {
-		return 0, fmt.Errorf("agent: failed to stat %s/%s: no such key", bucket, key)
+		return 0, fmt.Errorf("agent: %s/%s: %w", bucket, key, ErrObjectNotFound)
 	}
 	return writeObject(bytes.NewReader(data), dests, mode)
 }

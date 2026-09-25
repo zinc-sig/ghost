@@ -25,7 +25,7 @@ func TestMaterializeObjectReplacesBlockers(t *testing.T) {
 	}
 	mirror := func(key, content string) {
 		t.Helper()
-		if _, err := materializeObject(target, "sub/", key, strings.NewReader(content)); err != nil {
+		if _, _, err := materializeObject(target, "sub/", key, strings.NewReader(content)); err != nil {
 			t.Fatalf("materializeObject(%q): %v", key, err)
 		}
 	}

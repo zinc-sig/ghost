@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -24,17 +25,19 @@ type ObjectStore interface {
 	// UploadBytes uploads data to bucket/key.
 	UploadBytes(ctx context.Context, bucket, key string, data []byte) error
 	// DownloadPrefix mirrors every object under bucket/prefix into
-	// targetDir, returning the number of files and total bytes written.
-	// Object keys that would escape targetDir are rejected. Each file
-	// replaces whatever is at its path, a directory included, and a file
-	// where one of its parent directories must be; the last key listed
-	// wins a path, and a retry rewrites what an earlier attempt left.
-	DownloadPrefix(ctx context.Context, bucket, prefix, targetDir string) (files int, bytes int64, err error)
+	// targetDir, returning the absolute path of every file it wrote and
+	// the total bytes written. Object keys that would escape targetDir are
+	// rejected. Each file replaces whatever is at its path, a directory
+	// included, and a file where one of its parent directories must be;
+	// the last key listed wins a path, and a retry rewrites what an
+	// earlier attempt left.
+	DownloadPrefix(ctx context.Context, bucket, prefix, targetDir string) (written []string, bytes int64, err error)
 	// DownloadObject writes the object at bucket/key to every path in
 	// dests, creating or truncating each with mode, and returns the
 	// object's size. The parent directories must exist. The key is checked
 	// before any destination is opened, so a missing key leaves no partial
-	// file behind.
+	// file behind; a missing key or bucket is reported as
+	// ErrObjectNotFound.
 	DownloadObject(ctx context.Context, bucket, key string, dests []string, mode os.FileMode) (int64, error)
 }
 
@@ -102,8 +105,8 @@ func (s *minioStore) UploadBytes(ctx context.Context, bucket, key string, data [
 	return nil
 }
 
-func (s *minioStore) DownloadPrefix(ctx context.Context, bucket, prefix, targetDir string) (int, int64, error) {
-	files := 0
+func (s *minioStore) DownloadPrefix(ctx context.Context, bucket, prefix, targetDir string) ([]string, int64, error) {
+	var written []string
 	var total int64
 
 	// Drain the full object listing BEFORE downloading any object. minio's
@@ -119,7 +122,7 @@ func (s *minioStore) DownloadPrefix(ctx context.Context, bucket, prefix, targetD
 	for obj := range s.client.ListObjects(listCtx, bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
 		if obj.Err != nil {
 			cancel()
-			return files, total, fmt.Errorf("agent: failed to list %s/%s: %w", bucket, prefix, obj.Err)
+			return written, total, fmt.Errorf("agent: failed to list %s/%s: %w", bucket, prefix, obj.Err)
 		}
 		// Skip directory marker objects.
 		if strings.HasSuffix(obj.Key, "/") {
@@ -132,17 +135,17 @@ func (s *minioStore) DownloadPrefix(ctx context.Context, bucket, prefix, targetD
 	for _, key := range keys {
 		r, err := s.client.GetObject(ctx, bucket, key, minio.GetObjectOptions{})
 		if err != nil {
-			return files, total, fmt.Errorf("agent: failed to get %s/%s: %w", bucket, key, err)
+			return written, total, fmt.Errorf("agent: failed to get %s/%s: %w", bucket, key, err)
 		}
-		n, err := materializeObject(targetDir, prefix, key, r)
+		dest, n, err := materializeObject(targetDir, prefix, key, r)
 		_ = r.Close()
 		if err != nil {
-			return files, total, err
+			return written, total, err
 		}
-		files++
+		written = append(written, dest)
 		total += n
 	}
-	return files, total, nil
+	return written, total, nil
 }
 
 func (s *minioStore) DownloadObject(ctx context.Context, bucket, key string, dests []string, mode os.FileMode) (int64, error) {
@@ -150,6 +153,10 @@ func (s *minioStore) DownloadObject(ctx context.Context, bucket, key string, des
 	// reports a missing key on the first read, by which time the targets
 	// would already be truncated.
 	if _, err := s.client.StatObject(ctx, bucket, key, minio.StatObjectOptions{}); err != nil {
+		switch minio.ToErrorResponse(err).Code {
+		case "NoSuchKey", "NoSuchBucket":
+			return 0, fmt.Errorf("agent: %s/%s: %w", bucket, key, ErrObjectNotFound)
+		}
 		return 0, fmt.Errorf("agent: failed to stat %s/%s: %w", bucket, key, err)
 	}
 	r, err := s.client.GetObject(ctx, bucket, key, minio.GetObjectOptions{})
@@ -159,6 +166,11 @@ func (s *minioStore) DownloadObject(ctx context.Context, bucket, key string, des
 	defer func() { _ = r.Close() }()
 	return writeObject(r, dests, mode)
 }
+
+// ErrObjectNotFound reports that an object key, or its bucket, does not
+// exist. A key core resolved from the pinned snapshot that is gone at fetch
+// time is a configuration problem a rerun cannot fix.
+var ErrObjectNotFound = errors.New("object not found")
 
 // writeObject copies one object's content to every dests entry, each
 // created or truncated with mode, and returns the object's size. It is
@@ -222,30 +234,30 @@ func objectDestination(targetDir, prefix, key string) (string, error) {
 }
 
 // materializeObject writes one object's content to its traversal-safe
-// destination under targetDir, creating parent directories (0755). The
-// destination is prepared as every staging write is (prepareFileTarget),
-// so a directory at the path or a file where a parent must be is replaced
-// rather than failing the download, and a symlink there is removed rather
-// than followed. It is shared by the real store and test fakes so the
-// defence is uniform.
-func materializeObject(targetDir, prefix, key string, r io.Reader) (int64, error) {
+// destination under targetDir, creating parent directories (0755), and
+// returns the destination. The destination is prepared as every staging
+// write is (prepareFileTarget), so a directory at the path or a file where
+// a parent must be is replaced rather than failing the download, and a
+// symlink there is removed rather than followed. It is shared by the real
+// store and test fakes so the defence is uniform.
+func materializeObject(targetDir, prefix, key string, r io.Reader) (string, int64, error) {
 	dest, err := objectDestination(targetDir, prefix, key)
 	if err != nil {
-		return 0, err
+		return "", 0, err
 	}
 	if err := prepareFileTarget(targetDir, dest, 0o755); err != nil {
-		return 0, fmt.Errorf("agent: %w", err)
+		return "", 0, fmt.Errorf("agent: %w", err)
 	}
 	f, err := os.Create(dest)
 	if err != nil {
-		return 0, fmt.Errorf("agent: failed to create %s: %w", dest, err)
+		return "", 0, fmt.Errorf("agent: failed to create %s: %w", dest, err)
 	}
 	n, err := io.Copy(f, r)
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
 	if err != nil {
-		return n, fmt.Errorf("agent: failed to write %s: %w", dest, err)
+		return "", n, fmt.Errorf("agent: failed to write %s: %w", dest, err)
 	}
-	return n, nil
+	return dest, n, nil
 }

@@ -569,26 +569,35 @@ func TestFetchSubmission_StagingInvalid(t *testing.T) {
 	}
 }
 
-// TestFetchSubmission_MissingObjectKeyFails asserts that an object whose
-// key does not exist fails the activity as an ordinary error, not as a
-// staging failure, and creates no target file.
+// TestFetchSubmission_MissingObjectKeyFails asserts a missing object key is
+// the non-retryable staging failure (a key gone from the pinned snapshot is
+// a configuration problem a rerun cannot fix), and that it fails before any
+// target is prepared: a delivered directory at a target survives, and no
+// missing parent directory is created.
 func TestFetchSubmission_MissingObjectKeyFails(t *testing.T) {
 	cfg := newTestConfig(t)
-	env := newActivityEnv(t, cfg, newFakeStore())
+	store := newFakeStore()
+	store.objects["b"] = map[string][]byte{"sub/dir/inner.txt": []byte("delivered\n")}
+	env := newActivityEnv(t, cfg, store)
 
 	in := contract.FetchSubmissionInput{
 		ProtocolVersion: contract.ProtocolVersion,
-		Objects:         []contract.ObjectSpec{{Bucket: "b", Key: "asset/absent", TargetPaths: []string{"a/b.txt", "c.txt"}}},
+		Downloads:       []contract.DownloadSpec{{Bucket: "b", Prefix: "sub/", TargetDir: "."}},
+		Objects:         []contract.ObjectSpec{{Bucket: "b", Key: "asset/absent", TargetPaths: []string{"dir", "new/deep/c.txt"}}},
 	}
 	err := func() error { _, err := fetchRun(t, env, in); return err }()
 	if err == nil {
 		t.Fatal("expected a missing key to fail the activity")
 	}
 	var appErr *temporal.ApplicationError
-	if errors.As(err, &appErr) && appErr.Type() == contract.StagingInvalidErrorType {
-		t.Errorf("missing key reported as %q; only a teacher clash carries that type", appErr.Type())
+	if !errors.As(err, &appErr) || appErr.Type() != contract.StagingInvalidErrorType {
+		t.Fatalf("missing key: want %s, got %v", contract.StagingInvalidErrorType, err)
 	}
-	wantMissing(t, cfg.Workdir, "a/b.txt", "c.txt")
+	if !appErr.NonRetryable() {
+		t.Error("a missing key must not be retried")
+	}
+	wantFiles(t, cfg.Workdir, map[string]string{"dir/inner.txt": "delivered\n"})
+	wantMissing(t, cfg.Workdir, "new")
 }
 
 // TestFetchSubmission_ObjectTargetRejected asserts that an object target
@@ -1115,4 +1124,155 @@ func fmtExitCode(code *int) string {
 		return "<nil>"
 	}
 	return strconv.Itoa(*code)
+}
+
+// wantStagingInvalid asserts err is the non-retryable staging failure.
+func wantStagingInvalid(t *testing.T, err error) {
+	t.Helper()
+	var appErr *temporal.ApplicationError
+	if !errors.As(err, &appErr) || appErr.Type() != contract.StagingInvalidErrorType {
+		t.Fatalf("want %s, got %v", contract.StagingInvalidErrorType, err)
+	}
+	if !appErr.NonRetryable() {
+		t.Errorf("%s must not be retried", contract.StagingInvalidErrorType)
+	}
+}
+
+// TestFetchSubmission_RetryIgnoresTeacherResidueMatchingStem asserts the
+// answer is chosen only among the files this attempt's delivery wrote. The
+// first attempt writes a teacher object whose name matches the answer stem
+// (q1.h) at the root and then fails on a later object; the retry must place
+// the student's q1.py at the target, not the teacher's header, which sorts
+// first and would otherwise be graded as the answer.
+func TestFetchSubmission_RetryIgnoresTeacherResidueMatchingStem(t *testing.T) {
+	cfg := newTestConfig(t)
+	store := newFakeStore()
+	store.objects["b"] = map[string][]byte{
+		"sub/q1.py":  []byte("student\n"),
+		"asset/q1.h": []byte("teacher header\n"),
+		"asset/late": []byte("late object\n"),
+	}
+	store.objectErrOnce = map[string]error{"b/asset/late": errors.New("transient store failure")}
+	env := newActivityEnv(t, cfg, store)
+
+	in := contract.FetchSubmissionInput{
+		ProtocolVersion: contract.ProtocolVersion,
+		Downloads:       []contract.DownloadSpec{{Bucket: "b", Prefix: "sub/", TargetDir: "."}},
+		Objects: []contract.ObjectSpec{
+			{Bucket: "b", Key: "asset/q1.h", TargetPaths: []string{"q1.h"}},
+			{Bucket: "b", Key: "asset/late", TargetPaths: []string{"late.txt"}},
+		},
+		Answer: &contract.AnswerSpec{Stem: "q1", TargetPath: "src/main.py"},
+	}
+	if _, err := fetchRun(t, env, in); err == nil {
+		t.Fatal("the first attempt should fail on the transient error")
+	}
+	wantFiles(t, cfg.Workdir, map[string]string{"q1.h": "teacher header\n"})
+
+	if _, err := fetchRun(t, env, in); err != nil {
+		t.Fatalf("retry failed: %v", err)
+	}
+	wantFiles(t, cfg.Workdir, map[string]string{
+		"src/main.py": "student\n",
+		"q1.h":        "teacher header\n",
+		"late.txt":    "late object\n",
+	})
+	wantMissing(t, cfg.Workdir, "q1.py")
+}
+
+// TestFetchSubmission_MountedTeacherDirectoryIsProtected asserts a write
+// that would destroy a directory mirrored from a teacher mount, or put a
+// file where the mount needs a directory, is the non-retryable staging
+// failure for the answer and for an object alike, leaving the mount
+// intact; replacing one mounted file at its exact path stays allowed.
+func TestFetchSubmission_MountedTeacherDirectoryIsProtected(t *testing.T) {
+	downloads := []contract.DownloadSpec{
+		{Bucket: "b", Prefix: "sub/", TargetDir: "."},
+		{Bucket: "b", Prefix: "exp/", TargetDir: "expected"},
+	}
+	objects := map[string][]byte{
+		"sub/q1.py":     []byte("student\n"),
+		"exp/out.txt":   []byte("teacher expected\n"),
+		"asset/replace": []byte("teacher replacement\n"),
+	}
+	cases := []struct {
+		name    string
+		in      contract.FetchSubmissionInput
+		invalid bool
+		want    map[string]string
+	}{
+		{
+			"answer on a mounted directory",
+			contract.FetchSubmissionInput{
+				ProtocolVersion: contract.ProtocolVersion,
+				Downloads:       downloads,
+				Answer:          &contract.AnswerSpec{Stem: "q1", TargetPath: "expected"},
+			},
+			true,
+			map[string]string{"expected/out.txt": "teacher expected\n"},
+		},
+		{
+			"answer below a mounted file",
+			contract.FetchSubmissionInput{
+				ProtocolVersion: contract.ProtocolVersion,
+				Downloads:       downloads,
+				Answer:          &contract.AnswerSpec{Stem: "q1", TargetPath: "expected/out.txt/main.py"},
+			},
+			true,
+			map[string]string{"expected/out.txt": "teacher expected\n"},
+		},
+		{
+			"object on a mounted directory",
+			contract.FetchSubmissionInput{
+				ProtocolVersion: contract.ProtocolVersion,
+				Downloads:       downloads,
+				Objects:         []contract.ObjectSpec{{Bucket: "b", Key: "asset/replace", TargetPaths: []string{"expected"}}},
+			},
+			true,
+			map[string]string{"expected/out.txt": "teacher expected\n"},
+		},
+		{
+			"object replacing one mounted file",
+			contract.FetchSubmissionInput{
+				ProtocolVersion: contract.ProtocolVersion,
+				Downloads:       downloads,
+				Objects:         []contract.ObjectSpec{{Bucket: "b", Key: "asset/replace", TargetPaths: []string{"expected/out.txt"}}},
+			},
+			false,
+			map[string]string{"expected/out.txt": "teacher replacement\n"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := newTestConfig(t)
+			store := newFakeStore()
+			store.objects["b"] = objects
+			env := newActivityEnv(t, cfg, store)
+			_, err := fetchRun(t, env, tc.in)
+			if tc.invalid {
+				wantStagingInvalid(t, err)
+			} else if err != nil {
+				t.Fatalf("fetch failed: %v", err)
+			}
+			wantFiles(t, cfg.Workdir, tc.want)
+		})
+	}
+}
+
+// TestFetchSubmission_NestedObjectTargetsAreInvalid asserts one object whose
+// targets nest (x and x/y) is the non-retryable staging failure, raised
+// before anything is written, rather than a retryable write error.
+func TestFetchSubmission_NestedObjectTargetsAreInvalid(t *testing.T) {
+	cfg := newTestConfig(t)
+	store := newFakeStore()
+	store.objects["b"] = map[string][]byte{"asset/file": []byte("teacher\n")}
+	env := newActivityEnv(t, cfg, store)
+
+	in := contract.FetchSubmissionInput{
+		ProtocolVersion: contract.ProtocolVersion,
+		Objects:         []contract.ObjectSpec{{Bucket: "b", Key: "asset/file", TargetPaths: []string{"x", "x/y"}}},
+	}
+	_, err := fetchRun(t, env, in)
+	wantStagingInvalid(t, err)
+	wantMissing(t, cfg.Workdir, "x")
 }

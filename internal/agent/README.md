@@ -22,14 +22,17 @@ directory:
    attempt rewrites the shape an earlier one left behind.
 2. The answer is set aside. When the input carries `answer`, the agent
    lists the regular files directly under the workspace root whose name
-   minus its extension equals `stem` and moves the first in byte-wise name
-   order into a fresh staging session. No match leaves the answer step out
+   minus its extension equals `stem`, among the root files this attempt's
+   delivery downloads wrote (the downloads whose `target_dir` is the root),
+   and moves the first in byte-wise name order into a fresh staging
+   session. A teacher file an earlier failed attempt left at the root is
+   never a candidate, even when its name matches the stem. No match leaves the answer step out
    entirely, so a teacher stub at the target stays. Several matches are a
    delivery shape only the student can produce, so the others stay at the
    root and the agent logs their names.
-3. Every `objects` entry, in list order: the object is written to each of
-   its `target_paths` under the workspace root (directories 0755, files
-   0644). A later write replaces an earlier one at the same path, so a
+3. Every `objects` entry, in list order: the object is fetched into the
+   staging session, then written to each of its `target_paths` under the
+   workspace root (directories 0755, files 0644). A later write replaces an earlier one at the same path, so a
    teacher file overwrites a delivered file with the same name. A
    delivered file where a parent directory must be, or a delivered
    directory at the target, is removed first.
@@ -38,17 +41,21 @@ directory:
    the same path is replaced, and a delivered file or directory in the way
    is removed.
 
-The one failure that no rerun can fix is a teacher object standing in the
-answer's way: an object wrote a file below the answer's target, which makes
-the target a directory, or wrote a file where a parent directory of the
-target must be. The activity then fails with the non-retryable
-`GhostStagingInvalid` error and core reports a configuration failure of the
-marking scheme. Nothing in the student's delivery raises it.
+Teacher files are protected: a write that would destroy one is a failure
+no rerun can fix. That covers the answer or an object landing on a
+directory that holds a teacher file (an object's, or one mirrored from a
+mount), or needing a directory where a teacher file sits; one object whose
+targets nest; and an object key that does not exist. The activity then
+fails with the non-retryable `GhostStagingInvalid` error, before the
+offending write, and core reports a configuration failure of the marking
+scheme. Replacing one teacher file at its exact path is not a failure: a
+later object wins, and the answer always wins its target. Nothing in the
+student's delivery raises the error.
 
 The set-aside and the placement cross filesystems when the staging
 directory is a tmpfs and the workspace a volume, so both fall back from a
 rename to a copy. A missing object key fails the activity before any of its
-targets is opened; a target that escapes the workspace or names the root
+targets is prepared; a target that escapes the workspace or names the root
 fails it before anything is written. The result counts every written target
 as one file.
 

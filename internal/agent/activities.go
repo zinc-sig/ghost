@@ -83,8 +83,9 @@ func checkProtocol(version int) error {
 // readiness/version handshake (contract: ghost-fetch-submission). Every
 // attempt stages from scratch in the contract's order: the prefix
 // downloads, the answer set aside, the teacher objects, the answer placed.
-// Only a teacher object standing in the answer's way fails with the
-// contract's staging-invalid type; the package README describes the rules.
+// An instruction the workspace cannot satisfy fails with the contract's
+// non-retryable staging-invalid type; the package README describes the
+// rules.
 func (a *Activities) FetchSubmission(ctx context.Context, in contract.FetchSubmissionInput) (contract.FetchSubmissionResult, error) {
 	if err := checkProtocol(in.ProtocolVersion); err != nil {
 		return contract.FetchSubmissionResult{}, err
@@ -104,6 +105,17 @@ func (a *Activities) FetchSubmission(ctx context.Context, in contract.FetchSubmi
 		AgentVersion:         a.cfg.AgentVersion,
 	}
 
+	absRoot, err := filepath.Abs(a.cfg.Workdir)
+	if err != nil {
+		return contract.FetchSubmissionResult{}, fmt.Errorf("failed to resolve workspace root %s: %w", a.cfg.Workdir, err)
+	}
+
+	// The downloads that target the workspace root carry the student's
+	// delivery; every other download mirrors a teacher mount. The delivered
+	// root files are the only answer candidates, and the mounted files are
+	// teacher content that no later write may silently destroy.
+	delivered := map[string]bool{}
+	var mounted []string
 	for _, d := range in.Downloads {
 		target, err := securePathUnder(a.cfg.Workdir, a.cfg.Workdir, d.TargetDir)
 		if err != nil {
@@ -112,54 +124,92 @@ func (a *Activities) FetchSubmission(ctx context.Context, in contract.FetchSubmi
 		if err := os.MkdirAll(target, 0o755); err != nil {
 			return contract.FetchSubmissionResult{}, fmt.Errorf("failed to create download target %s: %w", target, err)
 		}
-		files, bytes, err := a.store.DownloadPrefix(ctx, d.Bucket, d.Prefix, target)
-		res.Files += files
+		paths, bytes, err := a.store.DownloadPrefix(ctx, d.Bucket, d.Prefix, target)
+		res.Files += len(paths)
 		res.Bytes += bytes
 		if err != nil {
 			return contract.FetchSubmissionResult{}, err
 		}
+		for _, p := range paths {
+			if target == absRoot {
+				if filepath.Dir(p) == absRoot {
+					delivered[filepath.Base(p)] = true
+				}
+				continue
+			}
+			mounted = append(mounted, p)
+		}
 		activity.RecordHeartbeat(ctx)
 	}
 
-	// The answer leaves the workspace before any object is written, so a
-	// teacher object at its delivered name cannot replace it. It is found
-	// among the files this attempt downloaded; a retry never reuses the
-	// copy an earlier attempt set aside, because that session is gone.
-	var answer *stagedAnswer
-	if in.Answer != nil {
-		session, err := os.MkdirTemp(a.cfg.StagingDir, "answer-")
+	var session string
+	if in.Answer != nil || len(in.Objects) > 0 {
+		session, err = os.MkdirTemp(a.cfg.StagingDir, "fetch-")
 		if err != nil {
 			return contract.FetchSubmissionResult{}, fmt.Errorf("failed to create staging session dir: %w", err)
 		}
 		defer func() { _ = os.RemoveAll(session) }()
-		answer, err = setAsideAnswer(a.cfg.Workdir, session, in.Answer.Stem)
+	}
+
+	// The answer leaves the workspace before any object is written, so a
+	// teacher object at its delivered name cannot replace it. It is chosen
+	// only among the root files this attempt's delivery download wrote, so
+	// a teacher object an earlier failed attempt left at the root, even one
+	// matching the stem, is never taken for the answer; a retry never
+	// reuses the copy an earlier attempt set aside, because that session is
+	// gone.
+	var answer *stagedAnswer
+	if in.Answer != nil {
+		answer, err = setAsideAnswer(a.cfg.Workdir, session, in.Answer.Stem, delivered)
 		if err != nil {
 			return contract.FetchSubmissionResult{}, err
 		}
 		if answer != nil && len(answer.others) > 0 {
-			logger.Warn("fetch-submission: several root files match the answer stem; the first by name is the answer",
+			logger.Warn("fetch-submission: several delivered root files match the answer stem; the first by name is the answer",
 				"stem", in.Answer.Stem, "answer", answer.name, "others", answer.others)
 		}
 	}
 
-	// Teacher objects overwrite whatever the downloads left at their
-	// targets. The written paths are kept for the answer's clash check.
+	// Teacher objects overwrite whatever the delivery left at their
+	// targets. Each object is fetched into the staging session first, so a
+	// missing key fails before any target is prepared, and its targets are
+	// checked against each other and against the mounted teacher files
+	// before anything in the workspace changes. The written paths are kept
+	// for the answer's clash check.
 	var written []string
-	for _, o := range in.Objects {
+	for idx, o := range in.Objects {
 		dests := make([]string, 0, len(o.TargetPaths))
 		for _, rel := range o.TargetPaths {
-			dest, err := placeFile(a.cfg.Workdir, rel, 0o755)
+			dest, err := resolveFile(a.cfg.Workdir, rel)
 			if err != nil {
 				return contract.FetchSubmissionResult{}, fmt.Errorf("object target %q: %w", rel, err)
+			}
+			if err := teacherBlocks(a.cfg.Workdir, dest, mounted); err != nil {
+				return contract.FetchSubmissionResult{}, stagingInvalid("object %s cannot be written to %s: %v", o.Key, rel, err)
 			}
 			dests = append(dests, dest)
 		}
 		if len(dests) == 0 {
 			continue
 		}
-		n, err := a.store.DownloadObject(ctx, o.Bucket, o.Key, dests, 0o644)
+		if err := nestedTargets(a.cfg.Workdir, dests); err != nil {
+			return contract.FetchSubmissionResult{}, stagingInvalid("object %s: %v", o.Key, err)
+		}
+		staged := filepath.Join(session, fmt.Sprintf("object-%d", idx))
+		n, err := a.store.DownloadObject(ctx, o.Bucket, o.Key, []string{staged}, 0o644)
+		if errors.Is(err, ErrObjectNotFound) {
+			return contract.FetchSubmissionResult{}, stagingInvalid("object %s/%s does not exist", o.Bucket, o.Key)
+		}
 		if err != nil {
 			return contract.FetchSubmissionResult{}, err
+		}
+		for i, dest := range dests {
+			if err := prepareFileTarget(a.cfg.Workdir, dest, 0o755); err != nil {
+				return contract.FetchSubmissionResult{}, fmt.Errorf("object target %q: %w", o.TargetPaths[i], err)
+			}
+			if err := copyFile(staged, dest); err != nil {
+				return contract.FetchSubmissionResult{}, fmt.Errorf("failed to write object %s to %s: %w", o.Key, o.TargetPaths[i], err)
+			}
 		}
 		res.Files += len(dests)
 		res.Bytes += n * int64(len(dests))
@@ -168,8 +218,9 @@ func (a *Activities) FetchSubmission(ctx context.Context, in contract.FetchSubmi
 	}
 
 	// The answer is placed last and wins its target. A delivered file or
-	// directory in the way is removed; a teacher object in the way is the
-	// one staging failure that no rerun can fix.
+	// directory in the way is removed; a teacher file in the way, written
+	// by an object or mirrored from a mount, is a staging failure no rerun
+	// can fix.
 	if answer != nil {
 		rel := in.Answer.TargetPath
 		if rel == "" {
@@ -179,12 +230,8 @@ func (a *Activities) FetchSubmission(ctx context.Context, in contract.FetchSubmi
 		if err != nil {
 			return contract.FetchSubmissionResult{}, fmt.Errorf("answer target %q: %w", rel, err)
 		}
-		if err := objectBlocks(a.cfg.Workdir, dest, written); err != nil {
-			return contract.FetchSubmissionResult{}, temporal.NewNonRetryableApplicationError(
-				fmt.Sprintf("answer %s cannot be placed at %s: %v", answer.name, rel, err),
-				contract.StagingInvalidErrorType,
-				nil,
-			)
+		if err := teacherBlocks(a.cfg.Workdir, dest, append(written, mounted...)); err != nil {
+			return contract.FetchSubmissionResult{}, stagingInvalid("answer %s cannot be placed at %s: %v", answer.name, rel, err)
 		}
 		if _, err := placeFile(a.cfg.Workdir, rel, 0o755); err != nil {
 			return contract.FetchSubmissionResult{}, fmt.Errorf("answer target %q: %w", rel, err)
@@ -197,6 +244,27 @@ func (a *Activities) FetchSubmission(ctx context.Context, in contract.FetchSubmi
 	return res, nil
 }
 
+// stagingInvalid is the non-retryable staging failure: an instruction the
+// workspace cannot satisfy and a rerun cannot fix.
+func stagingInvalid(format string, args ...any) error {
+	return temporal.NewNonRetryableApplicationError(fmt.Sprintf(format, args...), contract.StagingInvalidErrorType, nil)
+}
+
+// nestedTargets reports two targets of one object where one is an
+// ancestor of the other: the object cannot be both a file and a directory
+// holding a file.
+func nestedTargets(root string, dests []string) error {
+	sep := string(filepath.Separator)
+	for _, a := range dests {
+		for _, b := range dests {
+			if strings.HasPrefix(b, a+sep) {
+				return fmt.Errorf("target %s is inside target %s", workspaceRel(root, b), workspaceRel(root, a))
+			}
+		}
+	}
+	return nil
+}
+
 // stagedAnswer is the student's answer file after it was set aside in the
 // staging session: its delivered root name, where it waits, and the other
 // root files that matched the stem and stay in place.
@@ -207,9 +275,10 @@ type stagedAnswer struct {
 }
 
 // answerCandidates returns the names of the regular files directly under
-// root whose name minus its extension equals stem, in byte-wise name
+// root whose name minus its extension equals stem and that delivered
+// holds (the root files this attempt's delivery wrote), in byte-wise name
 // order. A name without an extension matches as a whole.
-func answerCandidates(root, stem string) ([]string, error) {
+func answerCandidates(root, stem string, delivered map[string]bool) ([]string, error) {
 	if stem == "" {
 		return nil, errors.New("answer stem is empty")
 	}
@@ -220,18 +289,18 @@ func answerCandidates(root, stem string) ([]string, error) {
 	var names []string
 	for _, e := range entries {
 		name := e.Name()
-		if e.Type().IsRegular() && strings.TrimSuffix(name, filepath.Ext(name)) == stem {
+		if e.Type().IsRegular() && delivered[name] && strings.TrimSuffix(name, filepath.Ext(name)) == stem {
 			names = append(names, name)
 		}
 	}
 	return names, nil
 }
 
-// setAsideAnswer moves the first candidate for stem out of root into the
-// staging session. It returns nil when no root file matches, which leaves
-// a teacher stub at the target in place.
-func setAsideAnswer(root, session, stem string) (*stagedAnswer, error) {
-	names, err := answerCandidates(root, stem)
+// setAsideAnswer moves the first delivered candidate for stem out of root
+// into the staging session. It returns nil when no delivered root file
+// matches, which leaves a teacher stub at the target in place.
+func setAsideAnswer(root, session, stem string, delivered map[string]bool) (*stagedAnswer, error) {
+	names, err := answerCandidates(root, stem, delivered)
 	if err != nil || len(names) == 0 {
 		return nil, err
 	}
@@ -322,13 +391,14 @@ func prepareFileTarget(root, dest string, dirMode os.FileMode) error {
 	return nil
 }
 
-// objectBlocks reports a teacher object standing in the answer's way at
-// dest: a written file below dest means an object made a directory there,
-// and a written file that is a strict ancestor of dest sits where a parent
-// directory must be. A written path equal to dest is not a block, because
-// the answer replaces it. Only paths that still exist as regular files
-// count, so an object a later object replaced does not.
-func objectBlocks(root, dest string, written []string) error {
+// teacherBlocks reports a teacher file (written by an object or mirrored
+// from a mount) that a write at dest would destroy: a teacher file below
+// dest means dest is a teacher directory, and a teacher file that is a
+// strict ancestor of dest sits where a parent directory must be. A teacher
+// path equal to dest is not a block, because the write replaces that one
+// file. Only paths that still exist as regular files count, so an object a
+// later object replaced does not.
+func teacherBlocks(root, dest string, written []string) error {
 	sep := string(filepath.Separator)
 	for _, p := range written {
 		st, err := os.Lstat(p)
@@ -337,9 +407,9 @@ func objectBlocks(root, dest string, written []string) error {
 		}
 		switch {
 		case strings.HasPrefix(p, dest+sep):
-			return fmt.Errorf("an object wrote %s below the target, which is therefore a directory", workspaceRel(root, p))
+			return fmt.Errorf("a teacher file %s is below the target, which is therefore a directory", workspaceRel(root, p))
 		case strings.HasPrefix(dest, p+sep):
-			return fmt.Errorf("an object wrote a file at %s, which the target needs as a directory", workspaceRel(root, p))
+			return fmt.Errorf("a teacher file at %s is where the target needs a directory", workspaceRel(root, p))
 		}
 	}
 	return nil

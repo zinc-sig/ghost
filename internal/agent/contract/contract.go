@@ -41,13 +41,16 @@ const MinProtocolVersion = 2
 const ProtocolMismatchErrorType = "GhostProtocolMismatch"
 
 // StagingInvalidErrorType is the Temporal ApplicationError type the agent
-// uses when the workspace cannot be staged as instructed: a teacher object
-// wrote a directory at the answer's target path or a file where one of its
-// parent directories must be. Core treats it as a configuration failure
-// (not retried): the marking-scheme assets and the submission path clash,
-// and rerunning cannot fix that. Nothing the student delivers raises it: a
-// delivered file or directory in the answer's way is removed, and several
-// root files matching the stem are resolved by name order.
+// uses when the workspace cannot be staged as instructed and a rerun cannot
+// fix it: a teacher file (an object, or a file mirrored from a mount) would
+// be destroyed by the answer or by an object, because it is a directory
+// holding a teacher file at the write's target or sits where the target
+// needs a directory; one object's targets nest (one is inside another); or
+// an object's key does not exist. Core treats it as a configuration failure
+// of the marking scheme and does not retry. Nothing the student delivers
+// raises it: a delivered file or directory in the way is removed, and
+// several delivered root files matching the stem are resolved by name
+// order.
 const StagingInvalidErrorType = "GhostStagingInvalid"
 
 // Activity names the agent registers on its per-run task queue and the
@@ -137,8 +140,10 @@ type DownloadSpec struct {
 // Each target is relative to the run workspace root and must resolve
 // inside it; the agent creates missing parent directories, and a file
 // where a parent directory must be or a directory at the target is
-// removed before the write. A missing key fails the activity before any
-// target is created.
+// removed before the write. The object is fetched before any target is
+// prepared, so a missing key (StagingInvalidErrorType) changes nothing in
+// the workspace; two targets where one is inside the other, or a target
+// that would destroy a mounted teacher file, is StagingInvalidErrorType.
 type ObjectSpec struct {
 	Bucket      string   `json:"bucket"`
 	Key         string   `json:"key"`
@@ -155,9 +160,9 @@ type ObjectSpec struct {
 // they are, because only the student's delivery can produce that shape.
 // The answer is placed last and always wins its target: a teacher object
 // at the same path is replaced, and a student-delivered file or directory
-// in the way is removed. A directory written there by an object, or an
-// object file where a parent directory of the target must be, is
-// StagingInvalidErrorType.
+// in the way is removed. A teacher directory at the target (holding an
+// object's file or a file mirrored from a mount), or a teacher file where a
+// parent directory of the target must be, is StagingInvalidErrorType.
 type AnswerSpec struct {
 	Stem string `json:"stem"`
 	// TargetPath is relative to the run workspace root. Empty means the
