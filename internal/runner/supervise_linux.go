@@ -29,6 +29,13 @@ const peakSampleInterval = 25 * time.Millisecond
 // supervise timeout (ported from zinc's executor).
 const gracefulShutdownDelay = 5 * time.Second
 
+// strayHolderDelay bounds how long Wait may block on the stdout and stderr
+// pipes after the command has exited when no timeout is configured. It is a
+// backstop: the sampler kills a leftover pipe holder within a tick of the
+// command's exit, so the delay only lands when that kill cannot remove the
+// holder.
+const strayHolderDelay = time.Second
+
 // Supervise forks the target command, measures it from a live parent (peak
 // memory, OOM attribution, output-size cap), and emits a result trailer to the
 // result file and as a stream frame on ghost's own stdout. Unlike ExecuteExec,
@@ -117,6 +124,14 @@ func Supervise(config *Config) error {
 			return nil
 		}
 		cmd.WaitDelay = gracefulShutdownDelay + time.Second
+	} else {
+		// Wait returns only when the stdout and stderr pipes close, and a
+		// leftover process of the command can hold them open past its
+		// exit. The sampler kills such a leftover within a tick of the
+		// command's exit; the delay bounds the wait for one that kill
+		// cannot remove, such as a process in an uninterruptible disk
+		// wait.
+		cmd.WaitDelay = strayHolderDelay
 	}
 
 	// §12.3 / §7: set RLIMIT_NPROC in the parent before fork; it is inherited
@@ -144,44 +159,42 @@ func Supervise(config *Config) error {
 		sampler.start()
 	}
 
-	// The memory budget is enforced on the child's members the same way the
-	// grading agent enforces it, and additionally on every process
-	// reparented to this supervise (see the memwatch package). Start and
+	// The memwatch sampler always runs, with the budget only gating
+	// enforcement: it enforces the budget on the child's members the same
+	// way the grading agent does, on every process reparented to this
+	// supervise besides, and it ends the run when the command exits by
+	// killing every member left behind, which also releases the output
+	// pipes Wait blocks on (see the memwatch package). Start and
 	// registration are one step so the group is watched from its first
 	// instruction.
-	var mem *memwatch.Sampler
-	var watch *memwatch.Watch
+	mem := memwatch.New()
+	// This supervise serves one exec, so every process it ends up holding
+	// is that exec's, including an orphan a double fork put in a session of
+	// its own.
+	if err := mem.EnableSubreaper(); err != nil {
+		fmt.Fprintf(os.Stderr, "ghost supervise: child subreaper: %v (continuing; an orphan in a session of its own is neither budgeted nor ended with the run)\n", err)
+	}
 	startTime := time.Now()
-	if config.MaxMemoryBytes > 0 {
-		mem = memwatch.New()
-		// This supervise serves one exec, so every process it ends up
-		// holding is that exec's, including an orphan a double fork put in
-		// a session of its own.
-		if err := mem.EnableSubreaper(); err != nil {
-			fmt.Fprintf(os.Stderr, "ghost supervise: child subreaper: %v (continuing; an orphan in a session of its own is not budgeted)\n", err)
-		}
-		var startErr error
-		watch, startErr = mem.StartWatched(cmd, config.MaxMemoryBytes)
-		if startErr != nil {
-			sampler.stop()
-			return fmt.Errorf("supervise: failed to start command: %w", startErr)
-		}
-	} else if err := cmd.Start(); err != nil {
+	watch, startErr := mem.StartWatched(cmd, config.MaxMemoryBytes)
+	if startErr != nil {
 		sampler.stop()
-		return fmt.Errorf("supervise: failed to start command: %w", err)
+		return fmt.Errorf("supervise: failed to start command: %w", startErr)
 	}
 
 	waitErr := cmd.Wait()
+	if errors.Is(waitErr, exec.ErrWaitDelay) {
+		// WaitDelay force-closed the pipes after the command itself exited
+		// cleanly; only a leftover pipe holder was cut off. The run's own
+		// status is success.
+		waitErr = nil
+	}
 	duration := time.Since(startTime).Milliseconds()
 
-	var memExceeded bool
-	if mem != nil {
-		// The group may not be empty after the direct child exits; kill it
-		// before unregistering so the final sample still attributes a
-		// kernel kill and the sweep removes escapees.
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		memExceeded = mem.Finish(watch).Exceeded
-	}
+	// The group may not be empty after the direct child exits; kill it
+	// before unregistering so the final sample still attributes a kernel
+	// kill and the sweep removes escapees.
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	memExceeded := mem.Finish(watch).Exceeded
 
 	sampled := sampler.stop()
 	watermark, _ := sandbox.ReadMemoryPeak()

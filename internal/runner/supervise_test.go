@@ -283,10 +283,10 @@ func TestSuperviseMemoryBudgetUnderBudgetPasses(t *testing.T) {
 	}
 }
 
-// TestSuperviseMemoryBudgetKillsLeftoverGroup asserts that with a budget
-// set, a process the command left running in its process group is killed
-// when the command exits (as the grading agent does), while without the
-// flag it survives, as before the budget existed.
+// TestSuperviseMemoryBudgetKillsLeftoverGroup asserts a process the
+// command left running in its process group is killed when the command
+// exits (as the grading agent does), with and without a budget: the kill
+// is membership-based, and the budget only gates enforcement.
 func TestSuperviseMemoryBudgetKillsLeftoverGroup(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -294,7 +294,7 @@ func TestSuperviseMemoryBudgetKillsLeftoverGroup(t *testing.T) {
 		survives bool
 	}{
 		{"with a budget the leftover is killed", 256 << 20, false},
-		{"without a budget the leftover survives", 0, true},
+		{"without a budget the leftover is killed too", 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()

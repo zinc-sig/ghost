@@ -36,6 +36,9 @@ Landlock filesystem restrictions (--landlock) are applied as needed. Network
 isolation is the container/cluster's responsibility (egress NetworkPolicy), not
 ghost's.
 
+The run ends when the command exits: every process the command leaves behind
+is killed, including one that left its process group or session.
+
 The '--' separator is required to distinguish ghost flags from the target command.`,
 	Example: `  ghost supervise --landlock -i /dev/null -o out -e err --result-file=/output/.result -- ./prog`,
 	RunE:    superviseCommand,

@@ -7,7 +7,10 @@
 // An exec's members are its root process, every descendant of the root,
 // and every process in the root's group, recomputed on every tick. A child
 // that leaves the group with setsid or setpgid is still a descendant and
-// stays budgeted while its parent chain to the root lives. An orphan in a
+// stays budgeted while its parent chain to the root lives. An exec ends
+// with its root: once the root has exited, any member still alive is
+// killed at the next tick, so a background process neither outlives its
+// exec nor holds the exec's output pipes open. An orphan in a
 // group of its own (a descendant whose parent exited and that also left the
 // exec's group, as a double fork into a new session makes) is charged only
 // under supervise: supervise serves one exec and is a child subreaper (see
@@ -266,8 +269,9 @@ func (s *Sampler) Finish(w *Watch) Outcome {
 }
 
 // sampleLocked runs one tick: kernel kill attribution against the previous
-// tick, then the budget check for every registered exec. It returns the
-// members of every registered exec keyed by the root's pid.
+// tick, then the budget check for every registered exec, and it kills the
+// members of an exec whose root has exited. It returns the members of every
+// registered exec keyed by the root's pid.
 func (s *Sampler) sampleLocked() map[int]groupSample {
 	kills := s.readOOMKills()
 	samples, err := snapshotProcs(s.procRoot)
@@ -279,6 +283,12 @@ func (s *Sampler) sampleLocked() map[int]groupSample {
 	}
 	children := childrenOf(samples)
 	groups := make(map[int]groupSample, len(s.watches))
+	rootAlive := make(map[int]bool, len(s.watches))
+	for _, p := range samples {
+		if _, ok := s.watches[p.pid]; ok && !p.zombie {
+			rootAlive[p.pid] = true
+		}
+	}
 	for pgid := range s.watches {
 		groups[pgid] = membersOf(pgid, samples, children)
 		if s.subreaper && len(s.watches) == 1 {
@@ -308,6 +318,13 @@ func (s *Sampler) sampleLocked() map[int]groupSample {
 			} else {
 				w.confirmSkip = confirmHysteresisTicks
 			}
+		}
+		if !rootAlive[w.pgid] && len(g.pids) > 0 {
+			// The root has exited (zombie or already reaped), so the run is
+			// over: a member still alive is a leftover of the command. The
+			// kill also releases the output pipes a leftover holds, which
+			// under supervise is what the caller's Wait is blocked on.
+			killMembers(w.pgid, g.pids)
 		}
 		w.prevSum = g.sum
 		w.prevPids = make(map[int]struct{}, len(g.pids))
