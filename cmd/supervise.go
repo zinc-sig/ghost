@@ -19,6 +19,7 @@ var (
 	superviseWorkdir            string
 	superviseMaxPids            uint64
 	superviseMaxOutputBytes     int64
+	superviseMaxMemoryBytes     int64
 	superviseResultFile         string
 	superviseSeccompProfileJSON string
 )
@@ -34,6 +35,9 @@ replaced. It survives the child to measure and report.
 Landlock filesystem restrictions (--landlock) are applied as needed. Network
 isolation is the container/cluster's responsibility (egress NetworkPolicy), not
 ghost's.
+
+The run ends when the command exits: every process the command leaves behind
+is killed, including one that left its process group or session.
 
 The '--' separator is required to distinguish ghost flags from the target command.`,
 	Example: `  ghost supervise --landlock -i /dev/null -o out -e err --result-file=/output/.result -- ./prog`,
@@ -71,6 +75,7 @@ func superviseCommand(cmd *cobra.Command, args []string) error {
 		SandboxWorkDir:     superviseWorkdir,
 		MaxPids:            superviseMaxPids,
 		MaxOutputBytes:     superviseMaxOutputBytes,
+		MaxMemoryBytes:     superviseMaxMemoryBytes,
 		ResultFile:         superviseResultFile,
 		SeccompProfileJSON: superviseSeccompProfileJSON,
 	}
@@ -90,6 +95,7 @@ func init() {
 	superviseCmd.Flags().BoolVar(&superviseLandlock, "landlock", false, "Apply Landlock filesystem restrictions before execution")
 	superviseCmd.Flags().StringVar(&superviseWorkdir, "workdir", "", "Working directory for Landlock read-write rules (defaults to current directory)")
 	superviseCmd.Flags().Uint64Var(&superviseMaxPids, "max-pids", 0, "Maximum number of processes for the current user (includes ghost itself; 0 = no limit)")
+	superviseCmd.Flags().Int64Var(&superviseMaxMemoryBytes, "max-memory-bytes", 0, "Memory budget in bytes for the command and every process it starts, including one that left its group or session; they are killed past it and the trailer flags the kill (0 = no budget)")
 	superviseCmd.Flags().Int64Var(&superviseMaxOutputBytes, "max-output-bytes", 1048576, "Total /output byte cap enforced as output is written")
 	superviseCmd.Flags().StringVar(&superviseResultFile, "result-file", "/output/.result", "Path the supervise result trailer is written to")
 	superviseCmd.Flags().StringVar(&superviseSeccompProfileJSON, "seccomp-profile-json", "", "Docker-format seccomp profile JSON applied to the command (inline, single-sourced from core)")

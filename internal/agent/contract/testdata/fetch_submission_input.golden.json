@@ -1,5 +1,5 @@
 {
-  "protocol_version": 2,
+  "protocol_version": 3,
   "downloads": [
     {
       "bucket": "course-1",
@@ -11,5 +11,26 @@
       "prefix": "exams/7/marking-scheme/expected/",
       "target_dir": "expected"
     }
-  ]
+  ],
+  "objects": [
+    {
+      "bucket": "course-1",
+      "key": "exams/7/marking-scheme-asset/q_java/v1/src/main/java/app/Main.java",
+      "target_paths": [
+        "src/main/java/app/Main.java"
+      ]
+    },
+    {
+      "bucket": "course-1",
+      "key": "exams/7/marking-scheme-asset/q_java/v1/pom.xml",
+      "target_paths": [
+        "pom.xml",
+        "examination-assets/q_java/pom.xml"
+      ]
+    }
+  ],
+  "answer": {
+    "stem": "q_java",
+    "target_path": "src/main/java/app/Solution.java"
+  }
 }

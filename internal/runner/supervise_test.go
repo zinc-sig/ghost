@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -241,5 +243,120 @@ func TestWriteTrailer_TightensPreexistingResultFile(t *testing.T) {
 	}
 	if got := decodeResultFile(t, path); got != want {
 		t.Errorf("trailer = %+v, want %+v", got, want)
+	}
+}
+
+func TestSuperviseMemoryBudgetKill(t *testing.T) {
+	dir := t.TempDir()
+	// Grow past the budget slowly enough for the 100ms sampler to see the
+	// tree over it, and cap the run so a missed kill fails fast.
+	cfg := superviseConfig(dir, "sh", "-c", `a=x; while :; do a="$a$a"; done`)
+	cfg.MaxMemoryBytes = 32 << 20
+	cfg.Timeout = 20 * time.Second
+	if err := Supervise(cfg); err != nil {
+		t.Fatalf("Supervise: %v", err)
+	}
+
+	tr := decodeResultFile(t, cfg.ResultFile)
+	if !tr.MemoryLimitExceeded {
+		t.Fatalf("memory_limit_exceeded = false, want true (exit_code %d, peak %d)", tr.ExitCode, tr.PeakMemoryB)
+	}
+	if tr.ExitCode != -1 {
+		t.Errorf("exit_code = %d, want -1 (killed)", tr.ExitCode)
+	}
+}
+
+func TestSuperviseMemoryBudgetUnderBudgetPasses(t *testing.T) {
+	dir := t.TempDir()
+	cfg := superviseConfig(dir, "sh", "-c", "echo ok")
+	cfg.MaxMemoryBytes = 256 << 20
+	if err := Supervise(cfg); err != nil {
+		t.Fatalf("Supervise: %v", err)
+	}
+
+	tr := decodeResultFile(t, cfg.ResultFile)
+	if tr.MemoryLimitExceeded {
+		t.Fatal("memory_limit_exceeded = true for a tiny command")
+	}
+	if tr.ExitCode != 0 {
+		t.Errorf("exit_code = %d, want 0", tr.ExitCode)
+	}
+}
+
+// TestSuperviseMemoryBudgetKillsLeftoverGroup asserts a process the
+// command left running in its process group is killed when the command
+// exits (as the grading agent does), with and without a budget: the kill
+// is membership-based, and the budget only gates enforcement.
+func TestSuperviseMemoryBudgetKillsLeftoverGroup(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		budget   int64
+		survives bool
+	}{
+		{"with a budget the leftover is killed", 256 << 20, false},
+		{"without a budget the leftover is killed too", 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			pidFile := filepath.Join(dir, "bg.pid")
+			// The leftover's stdio is detached so the command's exit is not held
+			// open by the capture pipe it would otherwise inherit.
+			cfg := superviseConfig(dir, "sh", "-c", fmt.Sprintf("sleep 30 </dev/null >/dev/null 2>&1 & echo $! > %s; exit 0", pidFile))
+			cfg.MaxMemoryBytes = tc.budget
+			if err := Supervise(cfg); err != nil {
+				t.Fatalf("Supervise: %v", err)
+			}
+			data, err := os.ReadFile(pidFile)
+			if err != nil {
+				t.Fatalf("read pid: %v", err)
+			}
+			var pid int
+			if _, err := fmt.Sscan(string(data), &pid); err != nil {
+				t.Fatalf("parse pid %q: %v", data, err)
+			}
+			t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+			// Reap-safe liveness: a killed child of a reparented group is
+			// gone or a zombie; kill -0 on a live process succeeds.
+			alive := func() bool {
+				if syscall.Kill(pid, 0) != nil {
+					return false
+				}
+				st, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+				return err == nil && !strings.Contains(string(st), ") Z ")
+			}
+			deadline := time.Now().Add(2 * time.Second)
+			for time.Now().Before(deadline) && alive() != tc.survives {
+				time.Sleep(20 * time.Millisecond)
+			}
+			if alive() != tc.survives {
+				t.Errorf("leftover alive = %v, want %v", alive(), tc.survives)
+			}
+		})
+	}
+}
+
+// boundedGrowth grows a shell string to 2^27 bytes (well past a 32 MiB
+// budget) and then holds it, so the sampler sees it resident; the bound
+// keeps the test safe on a host without a container memory cap.
+const boundedGrowth = `a=x; i=0; while [ $i -lt 27 ]; do a="$a$a"; i=$((i+1)); done; sleep 3`
+
+// TestSuperviseMemoryBudgetCountsSetsidChild asserts a child that left the
+// command's process group with setsid, while its parent waits for it, is
+// still charged to the budget and killed: it is a descendant of the
+// command, whatever its group.
+func TestSuperviseMemoryBudgetCountsSetsidChild(t *testing.T) {
+	if _, err := exec.LookPath("setsid"); err != nil {
+		t.Skip("setsid not installed")
+	}
+	dir := t.TempDir()
+	cfg := superviseConfig(dir, "sh", "-c", fmt.Sprintf("setsid sh -c '%s' & wait", boundedGrowth))
+	cfg.MaxMemoryBytes = 32 << 20
+	cfg.Timeout = 20 * time.Second
+	if err := Supervise(cfg); err != nil {
+		t.Fatalf("Supervise: %v", err)
+	}
+	tr := decodeResultFile(t, cfg.ResultFile)
+	if !tr.MemoryLimitExceeded {
+		t.Fatalf("memory_limit_exceeded = false for a setsid child past the budget (exit %d)", tr.ExitCode)
 	}
 }
