@@ -177,6 +177,7 @@ func Supervise(config *Config) error {
 	startTime := time.Now()
 	watch, startErr := mem.StartWatched(cmd, config.MaxMemoryBytes)
 	if startErr != nil {
+		mem.Close()
 		sampler.stop()
 		return fmt.Errorf("supervise: failed to start command: %w", startErr)
 	}

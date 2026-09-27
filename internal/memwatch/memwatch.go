@@ -142,6 +142,14 @@ func (s *Sampler) reapExited() {
 	}
 }
 
+// Close ends the sampler's SIGCHLD reaping for an exec that never started;
+// Finish ends it for one that ran. Without it a failed start would leave
+// the reaping running, and with no registered root it would steal the wait
+// status of any later child of the process.
+func (s *Sampler) Close() {
+	s.stopReaper()
+}
+
 // stopReaper ends the SIGCHLD reaping goroutine, if one runs. It must be
 // called without the lock held, since the goroutine takes it.
 func (s *Sampler) stopReaper() {
