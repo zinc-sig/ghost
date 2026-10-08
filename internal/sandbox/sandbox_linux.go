@@ -17,9 +17,10 @@ var landlockABI = llsyscall.LandlockGetABIVersion
 
 // ApplySandbox applies the Landlock filesystem restrictions shared by exec
 // and supervise. Read-only: /usr, /bin, /lib, /lib64, /etc, /opt, /proc, and
-// /sys/fs/cgroup, each ignored if missing. Read-write: /output, /tmp, /dev,
-// and the given work directory. It returns the RequireLandlock error when
-// the kernel does not enforce Landlock.
+// /sys/fs/cgroup, each ignored if missing. Read-write: /output, /tmp, and
+// /dev, each ignored if missing, and the given work directory (see
+// WritableDirs). It returns the RequireLandlock error when the kernel does
+// not enforce Landlock.
 func ApplySandbox(workDir string) error {
 	if workDir == "" {
 		return fmt.Errorf("sandbox: workDir must not be empty")
@@ -44,7 +45,10 @@ func ApplySandbox(workDir string) error {
 		// /proc entry stays unreadable. supervise's sampler reads the cgroup
 		// files after this is applied.
 		landlock.RODirs("/proc", "/sys/fs/cgroup").IgnoreIfMissing(),
-		landlock.RWDirs("/output", "/tmp", "/dev", workDir),
+		// A shared directory that does not exist grants nothing, so it is
+		// skipped; the work directory is required.
+		landlock.RWDirs(sharedWritableDirs...).IgnoreIfMissing(),
+		landlock.RWDirs(workDir),
 	}
 
 	if err := landlock.V5.BestEffort().RestrictPaths(rules...); err != nil {

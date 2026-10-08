@@ -15,6 +15,17 @@ import (
 // filesystem restrictions.
 const EnvLandlockBestEffort = "GHOST_LANDLOCK_BEST_EFFORT"
 
+// sharedWritableDirs are the directories ApplySandbox lets a command write
+// in addition to its work directory.
+var sharedWritableDirs = []string{"/output", "/tmp", "/dev"}
+
+// WritableDirs returns every directory ApplySandbox lets a command write
+// when its work directory is workDir. Files the agent keeps from the
+// command, such as its staging area, belong outside all of them.
+func WritableDirs(workDir string) []string {
+	return append(append([]string{}, sharedWritableDirs...), workDir)
+}
+
 // LandlockAvailable reports whether the kernel enforces Landlock (ABI 1 or
 // later) for this process. It is false when the kernel lacks the Landlock
 // LSM and also when a seccomp filter denies the Landlock syscalls.

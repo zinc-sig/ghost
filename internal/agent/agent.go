@@ -46,6 +46,9 @@ func Run(cfg *Config) error {
 				sandbox.EnvLandlockBestEffort)
 		}
 	}
+	if err := checkStagingUnreachable(cfg); err != nil {
+		return err
+	}
 	if os.Getenv("GOMEMLIMIT") == "" {
 		debug.SetMemoryLimit(agentMemoryLimit)
 	}
