@@ -163,3 +163,43 @@ func TestLoadConfigMissingRequired(t *testing.T) {
 		})
 	}
 }
+
+// TestLoadConfigDefaultTimeoutBounds asserts that the default exec timeout
+// must be positive and at most maxDefaultTimeout. A zero or negative value
+// would time out every exec that sets no timeout at once. A value near one
+// hour would outlast core's backstop for such an exec, so core would
+// abandon the activity and fail the run as an infrastructure fault instead
+// of receiving the timed-out result.
+func TestLoadConfigDefaultTimeoutBounds(t *testing.T) {
+	tests := []struct {
+		value   string
+		wantErr bool
+	}{
+		{value: "1s"},
+		{value: maxDefaultTimeout.String()},
+		{value: "0s", wantErr: true},
+		{value: "-5s", wantErr: true},
+		{value: (maxDefaultTimeout + time.Second).String(), wantErr: true},
+		{value: "1h", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			setRequiredEnv(t)
+			t.Setenv(EnvDefaultTimeout, tt.value)
+
+			cfg, err := LoadConfig()
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), EnvDefaultTimeout) {
+					t.Fatalf("LoadConfig() error = %v, want one naming %s", err, EnvDefaultTimeout)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LoadConfig() = %v", err)
+			}
+			if want, _ := time.ParseDuration(tt.value); cfg.DefaultTimeout != want {
+				t.Errorf("DefaultTimeout = %v, want %v", cfg.DefaultTimeout, want)
+			}
+		})
+	}
+}
