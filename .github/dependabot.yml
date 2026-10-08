@@ -1,0 +1,57 @@
+version: 2
+
+# Dependabot reads this file from the default branch, which is main.
+#
+# Version updates are grouped into one pull request per batch, so a week of
+# bumps costs one CI run instead of one per dependency. Security updates are
+# not grouped here.
+#
+# A dependency joins the first group it matches, so the specific groups come
+# before the catch-all.
+
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore(deps)"
+    labels: []
+    groups:
+      # The Temporal SDK and its API module move together. The contract with
+      # core is the protocol version in internal/agent/contract, not the SDK
+      # version, so a bump here does not need a matching change in core.
+      temporal:
+        patterns: ["go.temporal.io/*"]
+        update-types: ["minor", "patch"]
+      # These libraries are the isolation boundary of the grading sandbox and
+      # depend on kernel behaviour, so they are reviewed apart from routine
+      # bumps.
+      sandbox:
+        patterns:
+          - "github.com/landlock-lsm/*"
+          - "github.com/elastic/go-seccomp-bpf"
+          - "kernel.org/pub/linux/libs/security/libcap/*"
+        update-types: ["minor", "patch"]
+      go-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # Actions are pinned to major tags, so every update is a major; group them
+  # into one pull request.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "ci"
+    labels: []
+    groups:
+      actions:
+        patterns: ["*"]
