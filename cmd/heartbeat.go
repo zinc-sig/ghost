@@ -103,11 +103,11 @@ func writeHeartbeat(path string) error {
 		return err
 	}
 	if err := f.Chmod(0o600); err != nil && !errors.Is(err, syscall.EPERM) && !errors.Is(err, syscall.ENOSYS) {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if _, err := f.Write([]byte(ts)); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	return f.Close()

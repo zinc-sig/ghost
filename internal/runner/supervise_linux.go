@@ -283,11 +283,11 @@ func writeTrailer(resultFile string, t output.Trailer) error {
 			return fmt.Errorf("supervise: write result file %s: %w", resultFile, err)
 		}
 		if err := tightenToOwnerOnly(f); err != nil {
-			f.Close()
+			_ = f.Close()
 			return fmt.Errorf("supervise: write result file %s: %w", resultFile, err)
 		}
 		if _, err := f.Write(data); err != nil {
-			f.Close()
+			_ = f.Close()
 			return fmt.Errorf("supervise: write result file %s: %w", resultFile, err)
 		}
 		if err := f.Close(); err != nil {
