@@ -918,7 +918,11 @@ func capForUpload(capturePath string, size, limit int64) (path string, capped bo
 
 // copyCapture copies a stdio capture file to a workdir-relative file
 // destination (contract: StdoutPath/StderrPath are file write
-// destinations for later stages), refusing workspace escapes.
+// destinations for later stages), refusing workspace escapes. The agent is
+// not sandboxed, so no symbolic link below the workspace root is followed
+// on the way to the destination, and the capture itself is read without
+// following one; a refusal caused by what the command left on disk wraps
+// errCaptureRefused.
 func copyCapture(capturePath, root, workdir, rel string) (err error) {
 	dest, err := securePathUnder(root, workdir, rel)
 	if err != nil {
@@ -927,17 +931,22 @@ func copyCapture(capturePath, root, workdir, rel string) (err error) {
 	if dest == workdir {
 		return fmt.Errorf("destination %q is a directory", rel)
 	}
-	src, err := os.Open(capturePath)
+	absRoot, err := filepath.Abs(root)
 	if err != nil {
-		return fmt.Errorf("failed to open capture %s: %w", capturePath, err)
+		return fmt.Errorf("failed to resolve workspace root %s: %w", root, err)
+	}
+	below, err := filepath.Rel(absRoot, dest)
+	if err != nil {
+		return fmt.Errorf("destination %q: %w", rel, err)
+	}
+	src, err := openCapture(capturePath)
+	if err != nil {
+		return err
 	}
 	defer func() { _ = src.Close() }()
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return fmt.Errorf("failed to create directory for %s: %w", dest, err)
-	}
-	dst, err := os.Create(dest)
+	dst, err := createBeneath(absRoot, below, 0o755, 0o666)
 	if err != nil {
-		return fmt.Errorf("failed to create %s: %w", dest, err)
+		return err
 	}
 	_, err = io.Copy(dst, src)
 	if cerr := dst.Close(); err == nil {
