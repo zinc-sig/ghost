@@ -83,7 +83,7 @@ The wire contract (activity names, payload shapes, protocol version) is frozen i
 | `GHOST_AGENT_STORAGE_SECURE` | no | `false` | Use TLS for object storage |
 | `GHOST_AGENT_WORKDIR` | no | `/workspace` | Run workspace root; all relative paths in specs resolve against it |
 | `GHOST_AGENT_STAGING_DIR` | no | fresh 0700 temp dir | Agent-owned staging area for stdin materialisation, stdio captures, and the answer set aside during fetch (never world-writable) |
-| `GHOST_AGENT_DEFAULT_TIMEOUT` | no | `60s` | Exec timeout when a spec's `timeout_ms` is 0 (Go duration) |
+| `GHOST_AGENT_DEFAULT_TIMEOUT` | no | `60s` | Exec timeout when a spec's `timeout_ms` is 0 (Go duration, positive and at most `50m`, so core's one-hour backstop for such an exec stays later than the agent's kill and upload) |
 | `GHOST_AGENT_MAX_PIDS` | no | `32` | `RLIMIT_NPROC` applied by the child before execve (0 disables) |
 | `GHOST_AGENT_SANDBOX` | no | `true` | When true, the child runs with `--landlock`, and the agent refuses to start on a kernel that does not enforce Landlock unless `GHOST_LANDLOCK_BEST_EFFORT=true` (disable only where the kernel lacks Landlock support, for example in tests) |
 | `GHOST_AGENT_MAX_CONCURRENT_EXECS` | no | `4` | Activities the worker runs at once in this container (0 falls back to the default) |

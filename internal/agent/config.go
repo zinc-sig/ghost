@@ -29,7 +29,8 @@ const (
 	// 0700 temp directory.
 	EnvStagingDir = "GHOST_AGENT_STAGING_DIR"
 	// EnvDefaultTimeout is the exec timeout applied when
-	// ExecSpec.TimeoutMs is 0, as a Go duration string (default "60s").
+	// ExecSpec.TimeoutMs is 0, as a Go duration string (default "60s",
+	// at most maxDefaultTimeout).
 	EnvDefaultTimeout = "GHOST_AGENT_DEFAULT_TIMEOUT"
 	// EnvMaxPids is the RLIMIT_NPROC value the child applies before
 	// execve (default 32; 0 disables the limit).
@@ -47,6 +48,14 @@ const (
 	// is unavailable).
 	EnvSandbox = "GHOST_AGENT_SANDBOX"
 )
+
+// maxDefaultTimeout bounds EnvDefaultTimeout. Core gives an exec that sets
+// no timeout a one-hour activity backstop, and the agent needs time after
+// the kill to upload the captures and return the timed-out result; core
+// budgets five minutes for that. A default at or near one hour would let
+// the backstop fire first, and core would fail the run as an
+// infrastructure fault.
+const maxDefaultTimeout = 50 * time.Minute
 
 // defaultMaxConcurrentExecs bounds concurrent activity execution per
 // container. 4 keeps the live process count well under the default
@@ -137,6 +146,9 @@ func LoadConfig() (*Config, error) {
 		d, err := time.ParseDuration(v)
 		if err != nil {
 			return nil, fmt.Errorf("agent: invalid %s %q: %w", EnvDefaultTimeout, v, err)
+		}
+		if d <= 0 || d > maxDefaultTimeout {
+			return nil, fmt.Errorf("agent: invalid %s %q: must be positive and at most %v", EnvDefaultTimeout, v, maxDefaultTimeout)
 		}
 		cfg.DefaultTimeout = d
 	} else {
