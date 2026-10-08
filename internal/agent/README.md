@@ -59,6 +59,36 @@ targets is prepared; a target that escapes the workspace or names the root
 fails it before anything is written. The result counts every written target
 as one file.
 
+## Exec errors and their kind
+
+`ghost-run-exec` reports a failure of the exec itself on the result's
+`error`, never as an activity error, and classifies it on `error_kind`.
+Core acts on the kind: it fails the run as an infrastructure failure and
+retries it for `infra`, and records the scenario as an error and scores it
+for `command`.
+
+- `infra` covers what the command cannot cause: an object storage upload,
+  the staging session or anything written into it, spawning the sandboxed
+  child, waiting for it, and any failure of a workspace path that is not a
+  refusal, such as a full disk. The staging area is outside every path a
+  command may write, so a failure there is the agent's own.
+- `command` covers what follows from the command or its spec. A spec path
+  that leaves the workspace or names the workdir or the workspace root is
+  one. A refusal is the other: the agent wraps `errCaptureRefused` or
+  `errWorkspacePathRefused` around a failure caused by what a command left
+  at a path the agent opens without following links (a symbolic link, a
+  directory, a FIFO, a file where a directory belongs, a mode the agent
+  cannot write through), at the workdir, the stdin path, a capture copy
+  destination, or the capture itself. A stdin path naming a workspace file
+  that does not exist is `command` as well.
+- When one exec has errors of both kinds, the kind is `infra`, so the run is
+  retried. A command that fills the disk is retried too, and when the retry
+  fails the same way core leaves the score ungraded for staff to review.
+
+`error_kind` is optional on the wire and needs no protocol version. A core
+that predates it ignores it, and a core that reads a result without it, from
+an agent that predates it, treats the error as `command`.
+
 ## Memory budgets and out-of-memory attribution
 
 An exec's `memory_limit_bytes` is a budget on the anonymous and shared
