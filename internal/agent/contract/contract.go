@@ -293,10 +293,14 @@ type ExecResult struct {
 	// PeakMemoryBytes is the largest sampled anonymous-memory sum of the
 	// exec's process group. 0 = not measured.
 	PeakMemoryBytes int64 `json:"peak_memory_bytes"`
-	// Error is a human-readable infra-level failure (spawn error,
+	// Error is a human-readable failure of the exec itself (spawn error,
 	// upload failure, and so on). The empty string means none. A non-zero
 	// exit is not an error.
-	Error      string    `json:"error,omitempty"`
+	Error string `json:"error,omitempty"`
+	// ErrorKind classifies Error; see ErrorKind. It is empty when Error is
+	// empty, and also when the agent predates the field, in which case
+	// core treats the error as it treats ErrorKindCommand.
+	ErrorKind  ErrorKind `json:"error_kind,omitempty"`
 	StartedAt  time.Time `json:"started_at"`
 	EndedAt    time.Time `json:"ended_at"`
 	DurationMs int64     `json:"duration_ms"`
@@ -307,6 +311,30 @@ type ExecResult struct {
 	StdoutURI string `json:"stdout_uri,omitempty"`
 	StderrURI string `json:"stderr_uri,omitempty"`
 }
+
+// ErrorKind says whether a rerun of the exec in a fresh container could
+// clear its error, which decides how core treats the exec's run. The field
+// is additive and optional: an agent that predates it sends no kind, a core
+// that predates it ignores the kind, and either way the error is treated as
+// ErrorKindCommand. Core treats a kind it does not know the same way.
+type ErrorKind string
+
+const (
+	// ErrorKindInfra is a failure of the agent or the infrastructure it
+	// depends on, which nothing the command does can produce: an object
+	// storage upload, the agent's own staging, spawning the sandboxed child,
+	// or waiting for it. Core fails the run as an infrastructure failure and
+	// retries it, and a run whose retry fails the same way is left without
+	// results, so its scores are ungraded rather than zero. When an exec
+	// has several errors and one of them is infra, the kind is infra.
+	ErrorKindInfra ErrorKind = "infra"
+	// ErrorKindCommand is a failure the command or its spec causes, which a
+	// rerun repeats: the command left a directory, a file, or a symlink at
+	// a workspace path the agent writes (the workdir or a capture copy
+	// destination), or a spec path leaves the workspace. Core records the
+	// scenario as an error and scores it as the formula says.
+	ErrorKindCommand ErrorKind = "command"
+)
 
 // URIFor is the frozen stdio-URI format: s3://<bucket>/<key>. The URI is
 // an opaque dereferenceable handle: only core's artifact-serving layer

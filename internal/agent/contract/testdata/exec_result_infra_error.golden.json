@@ -1,0 +1,24 @@
+{
+  "command": "diff",
+  "args": [
+    "--ignore-case",
+    "q_sa.txt",
+    "expected/q_sa.expected"
+  ],
+  "exit_code": 0,
+  "timed_out": false,
+  "output_limit_exceeded": false,
+  "output_limit_bytes": 67108864,
+  "stdout_bytes": 512,
+  "stderr_bytes": 0,
+  "memory_limit_exceeded": false,
+  "memory_limit_bytes": 268435456,
+  "peak_memory_bytes": 3145728,
+  "error": "upload stdout: connection reset by peer",
+  "error_kind": "infra",
+  "started_at": "2026-06-10T12:00:00Z",
+  "ended_at": "2026-06-10T12:00:01.5Z",
+  "duration_ms": 1500,
+  "stdin_uri": "s3://course-1/runs/55/test/q_sa/stdin",
+  "stderr_uri": "s3://course-1/runs/55/test/q_sa/stderr"
+}
