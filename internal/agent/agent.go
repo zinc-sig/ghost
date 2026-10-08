@@ -12,6 +12,7 @@ import (
 
 	"github.com/zinc-sig/ghost/internal/agent/contract"
 	"github.com/zinc-sig/ghost/internal/cpuquota"
+	"github.com/zinc-sig/ghost/internal/sandbox"
 )
 
 // agentMemoryLimit is the Go soft memory limit the agent runs under when
@@ -31,6 +32,20 @@ const agentMemoryLimit = 192 << 20
 // the kernel kills a student process. The memory budgets section of
 // README.md explains the layers.
 func Run(cfg *Config) error {
+	// Landlock is the filesystem boundary of every command and the guard
+	// between concurrent commands. Without it each exec child refuses to
+	// run and exits 1, which the result would report as the command's own
+	// exit code, so the agent stops before joining the queue and the run
+	// fails as an infrastructure fault instead.
+	if cfg.Sandbox {
+		if err := sandbox.RequireLandlock(); err != nil {
+			return fmt.Errorf("agent: %w", err)
+		}
+		if !sandbox.LandlockAvailable() {
+			fmt.Fprintf(os.Stderr, "ghost agent: Landlock is unavailable and %s is set; commands run without filesystem restrictions\n",
+				sandbox.EnvLandlockBestEffort)
+		}
+	}
 	if os.Getenv("GOMEMLIMIT") == "" {
 		debug.SetMemoryLimit(agentMemoryLimit)
 	}

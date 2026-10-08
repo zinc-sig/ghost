@@ -52,6 +52,13 @@ type seccompProfile struct {
 	Syscalls        []seccompSyscall `json:"syscalls,omitempty"`
 }
 
+// seccompSyscall is one rule of the profile. The includes and excludes
+// fields of the Docker format, which gate a rule on kernel version,
+// capabilities, or architecture, are not read: every rule applies on every
+// kernel. A rule that Docker gates on a minimum kernel, such as allowing
+// ptrace only from kernel 4.8, therefore applies on older kernels as well;
+// ghost refuses to run a sandboxed command without Landlock, which needs
+// kernel 5.13, so such a kernel never reaches the filter in that mode.
 type seccompSyscall struct {
 	Names  []string     `json:"names"`
 	Action string       `json:"action"`
