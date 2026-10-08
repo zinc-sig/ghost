@@ -496,7 +496,10 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 	if err != nil {
 		return infraFail(fmt.Errorf("workdir %q: %w", spec.Workdir, err))
 	}
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
+	// An earlier command may have left a symbolic link on the way, and the
+	// agent is not sandboxed, so the workdir is created beneath the root
+	// without following one.
+	if err := mkdirWorkdir(a.cfg.Workdir, workdir); err != nil {
 		return infraFail(fmt.Errorf("failed to create workdir %s: %w", workdir, err))
 	}
 
@@ -524,13 +527,9 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 		stdinProvided = true
 	case spec.StdinPath != nil:
 		p := *spec.StdinPath
-		if filepath.IsAbs(p) {
-			stdinPath = p
-		} else {
-			stdinPath, err = securePathUnder(a.cfg.Workdir, a.cfg.Workdir, p)
-			if err != nil {
-				return infraFail(fmt.Errorf("stdin path %q: %w", p, err))
-			}
+		stdinPath, err = stageStdinPath(a.cfg.Workdir, p, filepath.Join(sessionDir, "stdin"))
+		if err != nil {
+			return infraFail(fmt.Errorf("stdin path %q: %w", p, err))
 		}
 		stdinProvided = true
 	}
