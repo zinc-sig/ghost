@@ -89,6 +89,16 @@ func canonicalExecResult() ExecResult {
 	}
 }
 
+// canonicalInfraErrorExecResult is an exec whose command exited 0 but whose
+// stdout upload failed: the error and its kind travel together.
+func canonicalInfraErrorExecResult() ExecResult {
+	r := canonicalExecResult()
+	r.Error = "upload stdout: connection reset by peer"
+	r.ErrorKind = ErrorKindInfra
+	r.StdoutURI = ""
+	return r
+}
+
 func checkGolden(t *testing.T, name string, v any) {
 	t.Helper()
 	got, err := json.MarshalIndent(v, "", "  ")
@@ -111,6 +121,7 @@ func TestWireEncodingFrozen(t *testing.T) {
 	checkGolden(t, "fetch_submission_result.golden.json", canonicalFetchResult())
 	checkGolden(t, "run_exec_input.golden.json", canonicalRunExecInput())
 	checkGolden(t, "exec_result.golden.json", canonicalExecResult())
+	checkGolden(t, "exec_result_infra_error.golden.json", canonicalInfraErrorExecResult())
 }
 
 func TestWireDecodingRoundTrips(t *testing.T) {
@@ -148,5 +159,21 @@ func TestWireDecodingRoundTrips(t *testing.T) {
 	}
 	if !res.StartedAt.Equal(canonicalExecResult().StartedAt) || !reflect.DeepEqual(res.Args, canonicalExecResult().Args) || *res.ExitCode != 0 {
 		t.Errorf("ExecResult round-trip mismatch: %+v", res)
+	}
+	raw, err = os.ReadFile(filepath.Join("testdata", "exec_result_infra_error.golden.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var infra ExecResult
+	if err := json.Unmarshal(raw, &infra); err != nil {
+		t.Fatal(err)
+	}
+	if infra.ErrorKind != ErrorKindInfra || infra.Error != canonicalInfraErrorExecResult().Error {
+		t.Errorf("ExecResult with an infra error round-trip mismatch: %+v", infra)
+	}
+	// An exec_result from an agent that predates ErrorKind decodes with no
+	// kind, which core treats as a command error.
+	if res.ErrorKind != "" {
+		t.Errorf("ExecResult without error_kind decoded kind %q, want empty", res.ErrorKind)
 	}
 }
