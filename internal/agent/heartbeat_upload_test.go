@@ -80,3 +80,47 @@ func TestRunExec_HeartbeatsThroughUploadPhase(t *testing.T) {
 		t.Fatalf("recorded %d heartbeats — heartbeats did not continue through the upload phase", got)
 	}
 }
+
+// TestRunExec_HeartbeatsDuringLongExec asserts that heartbeats are recorded
+// while a command is still running and writing a large stdout, with an
+// object store that uploads at once. The ticker runs on its own goroutine
+// from the spawn, and the command writes its output straight to the
+// capture file, so neither a long run nor the output volume holds it back.
+// A heartbeat that started after the command exited, or waited on its
+// output, would record nothing here, because the uploads take no time.
+func TestRunExec_HeartbeatsDuringLongExec(t *testing.T) {
+	origInterval := heartbeatInterval
+	heartbeatInterval = 100 * time.Millisecond
+	defer func() { heartbeatInterval = origInterval }()
+
+	cfg := newTestConfig(t)
+	env := newActivityEnv(t, cfg, newFakeStore())
+
+	var beats atomic.Int64
+	env.SetOnActivityHeartbeatListener(func(_ *activity.Info, _ converter.EncodedValues) {
+		beats.Add(1)
+	})
+
+	input := contract.RunExecInput{
+		ProtocolVersion: contract.ProtocolVersion,
+		Spec: contract.ExecSpec{
+			Command: "/bin/sh",
+			Args:    []string{"-c", "head -c 33554432 /dev/zero; sleep 1"},
+			Workdir: ".",
+		},
+		StdioUpload: contract.StdioUploadSpec{Bucket: "runs", KeyPrefix: "55/test/long"},
+	}
+	res := execRun(t, env, input)
+	if res.ExitCode == nil || *res.ExitCode != 0 {
+		t.Fatalf("ExitCode = %v, want 0 (error: %q)", res.ExitCode, res.Error)
+	}
+	if res.StdoutBytes != 33554432 {
+		t.Errorf("StdoutBytes = %d, want 33554432", res.StdoutBytes)
+	}
+	// The SDK batches heartbeats into wire sends, so one send is the
+	// observable signal; TestRunExec_HeartbeatsThroughUploadPhase states the
+	// reason.
+	if got := beats.Load(); got < 1 {
+		t.Fatalf("recorded %d heartbeats while the command ran", got)
+	}
+}
