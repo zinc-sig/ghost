@@ -440,7 +440,7 @@ func TestExecuteExecModeNonExistentCommand(t *testing.T) {
 		Exec:       true,
 	}
 
-	err := ExecuteExec(config)
+	err := executeExecInChild(t, config)
 	if err == nil {
 		t.Fatal("expected error for non-existent command in exec mode, got nil")
 	}
