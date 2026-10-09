@@ -10,13 +10,23 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// landlockABI returns the Landlock ABI version the kernel enforces for this
+// process. It is a variable so tests can stand in for a kernel without
+// Landlock.
+var landlockABI = llsyscall.LandlockGetABIVersion
+
 // ApplySandbox applies the Landlock filesystem restrictions shared by exec
 // and supervise. Read-only: /usr, /bin, /lib, /lib64, /etc, /opt, /proc, and
-// /sys/fs/cgroup, each ignored if missing. Read-write: /output, /tmp, /dev,
-// and the given work directory.
+// /sys/fs/cgroup, each ignored if missing. Read-write: /output, /tmp, and
+// /dev, each ignored if missing, and the given work directory (see
+// WritableDirs). It returns the RequireLandlock error when the kernel does
+// not enforce Landlock.
 func ApplySandbox(workDir string) error {
 	if workDir == "" {
 		return fmt.Errorf("sandbox: workDir must not be empty")
+	}
+	if err := RequireLandlock(); err != nil {
+		return err
 	}
 
 	rules := []landlock.Rule{
@@ -35,21 +45,16 @@ func ApplySandbox(workDir string) error {
 		// /proc entry stays unreadable. supervise's sampler reads the cgroup
 		// files after this is applied.
 		landlock.RODirs("/proc", "/sys/fs/cgroup").IgnoreIfMissing(),
-		landlock.RWDirs("/output", "/tmp", "/dev", workDir),
+		// A shared directory that does not exist grants nothing, so it is
+		// skipped; the work directory is required.
+		landlock.RWDirs(sharedWritableDirs...).IgnoreIfMissing(),
+		landlock.RWDirs(workDir),
 	}
 
 	if err := landlock.V5.BestEffort().RestrictPaths(rules...); err != nil {
 		return fmt.Errorf("sandbox: landlock restrict paths: %w", err)
 	}
 	return nil
-}
-
-// LandlockAvailable reports whether the kernel supports Landlock (ABI >= 1).
-// Used by tests to decide whether the sandbox actually enforces filesystem
-// restrictions on this host; BestEffort no-ops when this is false.
-func LandlockAvailable() bool {
-	v, err := llsyscall.LandlockGetABIVersion()
-	return err == nil && v >= 1
 }
 
 // EnforceMaxPids sets RLIMIT_NPROC for the current UID. The kernel counts

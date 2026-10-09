@@ -465,9 +465,10 @@ func copyFile(src, dst string) (err error) {
 }
 
 // RunExec runs exactly one resolved exec spec in a sandboxed child
-// process (contract: ghost-run-exec). Infra failures inside the exec
-// (spawn errors, upload errors) are reported on the result's Error
-// field, not as activity errors: the exec_result is the contract.
+// process (contract: ghost-run-exec). Failures inside the exec (spawn
+// errors, upload errors, a capture copy the workspace refuses) are reported
+// on the result's Error field, classified by ErrorKind, not as activity
+// errors: the exec_result is the contract.
 func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (contract.ExecResult, error) {
 	if err := checkProtocol(in.ProtocolVersion); err != nil {
 		return contract.ExecResult{}, err
@@ -485,8 +486,9 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 		res.EndedAt = end
 		res.DurationMs = end.Sub(start).Milliseconds()
 	}
-	infraFail := func(err error) (contract.ExecResult, error) {
+	failExec := func(kind contract.ErrorKind, err error) (contract.ExecResult, error) {
 		res.Error = err.Error()
+		res.ErrorKind = kind
 		finish()
 		return res, nil
 	}
@@ -494,17 +496,20 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 	// Resolve the effective workdir under the workspace root.
 	workdir, err := securePathUnder(a.cfg.Workdir, a.cfg.Workdir, spec.Workdir)
 	if err != nil {
-		return infraFail(fmt.Errorf("workdir %q: %w", spec.Workdir, err))
+		return failExec(contract.ErrorKindCommand, fmt.Errorf("workdir %q: %w", spec.Workdir, err))
 	}
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		return infraFail(fmt.Errorf("failed to create workdir %s: %w", workdir, err))
+	// An earlier command may have left a symbolic link on the way, and the
+	// agent is not sandboxed, so the workdir is created beneath the root
+	// without following one.
+	if err := mkdirWorkdir(a.cfg.Workdir, workdir); err != nil {
+		return failExec(workdirErrorKind(err), fmt.Errorf("failed to create workdir %s: %w", workdir, err))
 	}
 
 	// Per-exec staging session: stdin materialisation and stdio capture
 	// files live in the agent-owned 0700 staging area.
 	sessionDir, err := os.MkdirTemp(a.cfg.StagingDir, "exec-")
 	if err != nil {
-		return infraFail(fmt.Errorf("failed to create staging session dir: %w", err))
+		return failExec(contract.ErrorKindInfra, fmt.Errorf("failed to create staging session dir: %w", err))
 	}
 	// Reclaim the session on return, after the uploads below have read
 	// the capture files. Staging may hold exam-answer content (a stdin
@@ -519,18 +524,14 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 	case spec.StdinContent != nil:
 		stdinPath = filepath.Join(sessionDir, "stdin")
 		if err := os.WriteFile(stdinPath, []byte(*spec.StdinContent), 0o600); err != nil {
-			return infraFail(fmt.Errorf("failed to materialize stdin: %w", err))
+			return failExec(contract.ErrorKindInfra, fmt.Errorf("failed to materialize stdin: %w", err))
 		}
 		stdinProvided = true
 	case spec.StdinPath != nil:
 		p := *spec.StdinPath
-		if filepath.IsAbs(p) {
-			stdinPath = p
-		} else {
-			stdinPath, err = securePathUnder(a.cfg.Workdir, a.cfg.Workdir, p)
-			if err != nil {
-				return infraFail(fmt.Errorf("stdin path %q: %w", p, err))
-			}
+		stdinPath, err = stageStdinPath(a.cfg.Workdir, p, filepath.Join(sessionDir, "stdin"))
+		if err != nil {
+			return failExec(stdinErrorKind(a.cfg.Workdir, p, err), fmt.Errorf("stdin path %q: %w", p, err))
 		}
 		stdinProvided = true
 	}
@@ -602,7 +603,7 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 	if err != nil {
 		// Could not spawn: ExitCode stays null per the contract; no
 		// stdio was produced, so nothing is uploaded.
-		return infraFail(fmt.Errorf("failed to spawn command: %w", err))
+		return failExec(contract.ErrorKindInfra, fmt.Errorf("failed to spawn command: %w", err))
 	}
 
 	// Heartbeat while the exec RUNS AND while its captures upload, so core's
@@ -698,7 +699,16 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 			"stage", in.Stage, "scenario", in.ScenarioCode, "pids", mem.Swept)
 	}
 
-	var infraErrs []string
+	// errs collects the failures after the spawn, and errKind classifies
+	// them: infra when any one is infra, so core retries the run.
+	var errs []string
+	var errKind contract.ErrorKind
+	addErr := func(kind contract.ErrorKind, msg string) {
+		errs = append(errs, msg)
+		if errKind != contract.ErrorKindInfra {
+			errKind = kind
+		}
+	}
 	switch {
 	case waitErr == nil:
 		code := 0
@@ -727,7 +737,7 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 				res.OutputLimitExceeded = true
 			}
 		} else {
-			infraErrs = append(infraErrs, fmt.Sprintf("wait failed: %v", waitErr))
+			addErr(contract.ErrorKindInfra, fmt.Sprintf("wait failed: %v", waitErr))
 		}
 	}
 
@@ -751,15 +761,17 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 	}
 
 	// Copy captures to workdir-relative file destinations for later
-	// stages, if requested.
+	// stages, if requested. The destination is in the workspace the command
+	// could write, so a failure is classified by what the command left
+	// there.
 	if spec.StdoutPath != nil {
 		if err := copyCapture(stdoutCapture, a.cfg.Workdir, workdir, *spec.StdoutPath); err != nil {
-			infraErrs = append(infraErrs, fmt.Sprintf("stdout_path: %v", err))
+			addErr(captureCopyErrorKind(a.cfg.Workdir, workdir, *spec.StdoutPath, err), fmt.Sprintf("stdout_path: %v", err))
 		}
 	}
 	if spec.StderrPath != nil {
 		if err := copyCapture(stderrCapture, a.cfg.Workdir, workdir, *spec.StderrPath); err != nil {
-			infraErrs = append(infraErrs, fmt.Sprintf("stderr_path: %v", err))
+			addErr(captureCopyErrorKind(a.cfg.Workdir, workdir, *spec.StderrPath, err), fmt.Sprintf("stderr_path: %v", err))
 		}
 	}
 
@@ -781,27 +793,31 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 	} {
 		path, capped, err := capForUpload(s.capture, s.size, outputLimit)
 		if err != nil {
-			infraErrs = append(infraErrs, fmt.Sprintf("cap %s for upload: %v", s.name, err))
+			addErr(contract.ErrorKindInfra, fmt.Sprintf("cap %s for upload: %v", s.name, err))
 			continue
 		}
 		if capped {
-			infraErrs = append(infraErrs, fmt.Sprintf("%s capture exceeded the output limit on disk (enforcement gap) — uploaded the first %d bytes", s.name, outputLimit))
+			// The output limit flag is already set; the capture outgrew it
+			// only because the command wrote past the limit, so a rerun
+			// repeats it.
+			addErr(contract.ErrorKindCommand, fmt.Sprintf("%s capture exceeded the output limit on disk (enforcement gap) — uploaded the first %d bytes", s.name, outputLimit))
 		}
 		if err := a.store.UploadFile(ctx, bucket, prefix+"/"+s.name, path); err != nil {
-			infraErrs = append(infraErrs, fmt.Sprintf("upload %s: %v", s.name, err))
+			addErr(contract.ErrorKindInfra, fmt.Sprintf("upload %s: %v", s.name, err))
 		} else {
 			*s.uri = contract.URIFor(bucket, prefix+"/"+s.name)
 		}
 	}
 	if stdinProvided {
 		if err := a.store.UploadFile(ctx, bucket, prefix+"/stdin", stdinPath); err != nil {
-			infraErrs = append(infraErrs, fmt.Sprintf("upload stdin: %v", err))
+			addErr(contract.ErrorKindInfra, fmt.Sprintf("upload stdin: %v", err))
 		} else {
 			res.StdinURI = contract.URIFor(bucket, prefix+"/stdin")
 		}
 	}
 
-	res.Error = strings.Join(infraErrs, "; ")
+	res.Error = strings.Join(errs, "; ")
+	res.ErrorKind = errKind
 	return res, nil
 }
 
@@ -918,7 +934,11 @@ func capForUpload(capturePath string, size, limit int64) (path string, capped bo
 
 // copyCapture copies a stdio capture file to a workdir-relative file
 // destination (contract: StdoutPath/StderrPath are file write
-// destinations for later stages), refusing workspace escapes.
+// destinations for later stages), refusing workspace escapes. The agent is
+// not sandboxed, so no symbolic link below the workspace root is followed
+// on the way to the destination, and the capture itself is read without
+// following one; a refusal caused by what the command left on disk wraps
+// errCaptureRefused.
 func copyCapture(capturePath, root, workdir, rel string) (err error) {
 	dest, err := securePathUnder(root, workdir, rel)
 	if err != nil {
@@ -927,17 +947,22 @@ func copyCapture(capturePath, root, workdir, rel string) (err error) {
 	if dest == workdir {
 		return fmt.Errorf("destination %q is a directory", rel)
 	}
-	src, err := os.Open(capturePath)
+	absRoot, err := filepath.Abs(root)
 	if err != nil {
-		return fmt.Errorf("failed to open capture %s: %w", capturePath, err)
+		return fmt.Errorf("failed to resolve workspace root %s: %w", root, err)
+	}
+	below, err := filepath.Rel(absRoot, dest)
+	if err != nil {
+		return fmt.Errorf("destination %q: %w", rel, err)
+	}
+	src, err := openCapture(capturePath)
+	if err != nil {
+		return err
 	}
 	defer func() { _ = src.Close() }()
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return fmt.Errorf("failed to create directory for %s: %w", dest, err)
-	}
-	dst, err := os.Create(dest)
+	dst, err := createBeneath(absRoot, below, 0o755, 0o666)
 	if err != nil {
-		return fmt.Errorf("failed to create %s: %w", dest, err)
+		return err
 	}
 	_, err = io.Copy(dst, src)
 	if cerr := dst.Close(); err == nil {
