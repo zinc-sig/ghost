@@ -4,7 +4,7 @@ go 1.24.5
 
 require (
 	github.com/elastic/go-seccomp-bpf v1.6.0
-	github.com/landlock-lsm/go-landlock v0.7.0
+	github.com/landlock-lsm/go-landlock v0.10.1
 	github.com/minio/minio-go/v7 v7.0.95
 	github.com/shopspring/decimal v1.4.0
 	github.com/spf13/cobra v1.9.1
