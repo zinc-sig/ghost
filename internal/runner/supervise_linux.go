@@ -48,6 +48,14 @@ func Supervise(config *Config) error {
 		fmt.Fprintf(os.Stderr, "ghost supervise: maxprocs: %v (continuing with default GOMAXPROCS)\n", err)
 	}
 
+	// Refuse before creating the capture files, so no capture is left
+	// behind for a command that never ran.
+	if config.Landlock {
+		if err := sandbox.RequireLandlock(); err != nil {
+			return fmt.Errorf("supervise: %w", err)
+		}
+	}
+
 	inputFile, err := os.Open(config.InputFile)
 	if err != nil {
 		return fmt.Errorf("supervise: failed to open input file %s: %w", config.InputFile, err)
@@ -275,11 +283,11 @@ func writeTrailer(resultFile string, t output.Trailer) error {
 			return fmt.Errorf("supervise: write result file %s: %w", resultFile, err)
 		}
 		if err := tightenToOwnerOnly(f); err != nil {
-			f.Close()
+			_ = f.Close()
 			return fmt.Errorf("supervise: write result file %s: %w", resultFile, err)
 		}
 		if _, err := f.Write(data); err != nil {
-			f.Close()
+			_ = f.Close()
 			return fmt.Errorf("supervise: write result file %s: %w", resultFile, err)
 		}
 		if err := f.Close(); err != nil {

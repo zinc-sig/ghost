@@ -28,6 +28,15 @@ func ExecuteExec(config *Config) error {
 		}
 	}
 
+	// Refuse before the stdio redirection, so the reason reaches the
+	// caller's stderr rather than the command's capture, and no capture is
+	// left behind for a command that never ran.
+	if config.Landlock {
+		if err := sandbox.RequireLandlock(); err != nil {
+			return fmt.Errorf("exec: %w", err)
+		}
+	}
+
 	// Open input file and dup3 to stdin
 	inputFile, err := os.Open(config.InputFile)
 	if err != nil {

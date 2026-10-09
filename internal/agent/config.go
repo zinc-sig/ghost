@@ -8,12 +8,16 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/zinc-sig/ghost/internal/agent/contract"
+	"github.com/zinc-sig/ghost/internal/sandbox"
 )
 
 // agentEnvPrefix is the prefix of every agent boot/config environment
@@ -26,10 +30,12 @@ const agentEnvPrefix = "GHOST_AGENT_"
 const (
 	// EnvStagingDir overrides the agent-owned staging directory used for
 	// stdin materialisation and stdio capture files. Defaults to a fresh
-	// 0700 temp directory.
+	// 0700 directory under the first writable of stagingRoots. With the
+	// sandbox on it must lie outside every directory a command may write.
 	EnvStagingDir = "GHOST_AGENT_STAGING_DIR"
 	// EnvDefaultTimeout is the exec timeout applied when
-	// ExecSpec.TimeoutMs is 0, as a Go duration string (default "60s").
+	// ExecSpec.TimeoutMs is 0, as a Go duration string (default "60s",
+	// at most maxDefaultTimeout).
 	EnvDefaultTimeout = "GHOST_AGENT_DEFAULT_TIMEOUT"
 	// EnvMaxPids is the RLIMIT_NPROC value the child applies before
 	// execve (default 32; 0 disables the limit).
@@ -47,6 +53,14 @@ const (
 	// is unavailable).
 	EnvSandbox = "GHOST_AGENT_SANDBOX"
 )
+
+// maxDefaultTimeout bounds EnvDefaultTimeout. Core gives an exec that sets
+// no timeout a one-hour activity backstop, and the agent needs time after
+// the kill to upload the captures and return the timed-out result; core
+// budgets five minutes for that. A default at or near one hour would let
+// the backstop fire first, and core would fail the run as an
+// infrastructure fault.
+const maxDefaultTimeout = 50 * time.Minute
 
 // defaultMaxConcurrentExecs bounds concurrent activity execution per
 // container. 4 keeps the live process count well under the default
@@ -138,6 +152,9 @@ func LoadConfig() (*Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("agent: invalid %s %q: %w", EnvDefaultTimeout, v, err)
 		}
+		if d <= 0 || d > maxDefaultTimeout {
+			return nil, fmt.Errorf("agent: invalid %s %q: must be positive and at most %v", EnvDefaultTimeout, v, maxDefaultTimeout)
+		}
 		cfg.DefaultTimeout = d
 	} else {
 		cfg.DefaultTimeout = 60 * time.Second
@@ -175,17 +192,17 @@ func LoadConfig() (*Config, error) {
 	}
 
 	// Staging is agent-owned (stdin materialisation, stdio captures) and
-	// must not be world-writable: 0700, never a shared /tmp path the
-	// sandboxed student process could scribble over.
+	// must not be world-writable: 0700, outside every directory a
+	// sandboxed command may write (checkStagingUnreachable).
 	if dir := os.Getenv(EnvStagingDir); dir != "" {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, fmt.Errorf("agent: failed to create staging dir %s: %w", dir, err)
 		}
 		cfg.StagingDir = dir
 	} else {
-		dir, err := os.MkdirTemp("", "ghost-agent-staging-")
+		dir, err := defaultStagingDir()
 		if err != nil {
-			return nil, fmt.Errorf("agent: failed to create staging dir: %w", err)
+			return nil, err
 		}
 		cfg.StagingDir = dir
 	}
@@ -222,4 +239,72 @@ func parseBoolEnv(name string, def bool) (bool, error) {
 		return false, fmt.Errorf("agent: invalid %s %q: %w", name, v, err)
 	}
 	return b, nil
+}
+
+// stagingRoots lists the directories under which the agent creates its
+// default staging directory, in order of preference. None is writable by a
+// sandboxed command. It is a variable so tests can stand in for a
+// container's filesystem.
+var stagingRoots = func() []string {
+	roots := []string{"/var/lib/ghost-agent"}
+	if dir, err := os.UserCacheDir(); err == nil {
+		roots = append(roots, filepath.Join(dir, "ghost-agent"))
+	}
+	return roots
+}
+
+// defaultStagingDir creates a fresh 0700 staging directory under the first
+// of stagingRoots the agent can write. The system temporary directory is
+// not a candidate: a sandboxed command may write it, and a command that
+// can reach the staging area can plant or swap the files the agent and the
+// exec child open there.
+func defaultStagingDir() (string, error) {
+	var errs []error
+	for _, root := range stagingRoots() {
+		if err := os.MkdirAll(root, 0o700); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		dir, err := os.MkdirTemp(root, "staging-")
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		return dir, nil
+	}
+	return "", fmt.Errorf("agent: no writable staging directory outside the sandbox's writable paths; set %s: %w",
+		EnvStagingDir, errors.Join(errs...))
+}
+
+// checkStagingUnreachable returns an error when the sandbox is on and the
+// staging directory lies in a directory a sandboxed command may write
+// (sandbox.WritableDirs). Same-user command code could otherwise replace a
+// capture with a link that the agent then reads, or plant a link where the
+// exec child, before Landlock applies, creates a capture.
+func checkStagingUnreachable(cfg *Config) error {
+	if !cfg.Sandbox {
+		return nil
+	}
+	staging := resolvedPath(cfg.StagingDir)
+	for _, dir := range sandbox.WritableDirs(cfg.Workdir) {
+		d := resolvedPath(dir)
+		if staging == d || strings.HasPrefix(staging, d+string(filepath.Separator)) {
+			return fmt.Errorf("agent: staging directory %s is inside %s, which sandboxed commands may write; set %s to a directory outside %s",
+				cfg.StagingDir, dir, EnvStagingDir, strings.Join(sandbox.WritableDirs(cfg.Workdir), ", "))
+		}
+	}
+	return nil
+}
+
+// resolvedPath returns p made absolute with symbolic links resolved, or as
+// far as that succeeds.
+func resolvedPath(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return filepath.Clean(p)
+	}
+	if r, err := filepath.EvalSymlinks(abs); err == nil {
+		return r
+	}
+	return abs
 }
