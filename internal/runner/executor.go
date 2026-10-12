@@ -96,7 +96,7 @@ func createFileWithDir(path string) (*os.File, error) {
 	// old (possibly broader) mode. Tighten it down. Ownership caveat: see
 	// tightenToOwnerOnly. A root-owned bind-mount file stays as core made it.
 	if err := tightenToOwnerOnly(file); err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, err
 	}
 	return file, nil
