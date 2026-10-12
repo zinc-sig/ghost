@@ -48,6 +48,14 @@ func Supervise(config *Config) error {
 		fmt.Fprintf(os.Stderr, "ghost supervise: maxprocs: %v (continuing with default GOMAXPROCS)\n", err)
 	}
 
+	// Refuse before creating the capture files, so no capture is left
+	// behind for a command that never ran.
+	if config.Landlock {
+		if err := sandbox.RequireLandlock(); err != nil {
+			return fmt.Errorf("supervise: %w", err)
+		}
+	}
+
 	inputFile, err := os.Open(config.InputFile)
 	if err != nil {
 		return fmt.Errorf("supervise: failed to open input file %s: %w", config.InputFile, err)

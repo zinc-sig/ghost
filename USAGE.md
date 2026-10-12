@@ -82,10 +82,10 @@ The wire contract (activity names, payload shapes, protocol version) is frozen i
 | `GHOST_AGENT_STORAGE_SESSION_TOKEN` | no | empty | STS session token (per-run credentials) |
 | `GHOST_AGENT_STORAGE_SECURE` | no | `false` | Use TLS for object storage |
 | `GHOST_AGENT_WORKDIR` | no | `/workspace` | Run workspace root; all relative paths in specs resolve against it |
-| `GHOST_AGENT_STAGING_DIR` | no | fresh 0700 temp dir | Agent-owned staging area for stdin materialisation, stdio captures, and the answer set aside during fetch (never world-writable) |
-| `GHOST_AGENT_DEFAULT_TIMEOUT` | no | `60s` | Exec timeout when a spec's `timeout_ms` is 0 (Go duration) |
+| `GHOST_AGENT_STAGING_DIR` | no | fresh 0700 dir under `/var/lib/ghost-agent`, else under the user cache dir | Agent-owned staging area for stdin materialisation, stdio captures, and the answer set aside during fetch (never world-writable). With `GHOST_AGENT_SANDBOX` on, the agent refuses to start when it lies under `/output`, `/tmp`, `/dev`, or the workspace, the directories a sandboxed command may write, because a command that can reach it could plant or swap the files the agent reads and uploads |
+| `GHOST_AGENT_DEFAULT_TIMEOUT` | no | `60s` | Exec timeout when a spec's `timeout_ms` is 0 (Go duration, positive and at most `50m`, so core's one-hour backstop for such an exec stays later than the agent's kill and upload) |
 | `GHOST_AGENT_MAX_PIDS` | no | `32` | `RLIMIT_NPROC` applied by the child before execve (0 disables) |
-| `GHOST_AGENT_SANDBOX` | no | `true` | When true, the child runs with `--landlock` (disable only where the kernel lacks Landlock support, e.g. tests) |
+| `GHOST_AGENT_SANDBOX` | no | `true` | When true, the child runs with `--landlock`, and the agent refuses to start on a kernel that does not enforce Landlock unless `GHOST_LANDLOCK_BEST_EFFORT=true` (disable only where the kernel lacks Landlock support, for example in tests) |
 | `GHOST_AGENT_MAX_CONCURRENT_EXECS` | no | `4` | Activities the worker runs at once in this container (0 falls back to the default) |
 
 `GHOST_AGENT_MAX_CONCURRENT_EXECS` and the first ten names are part of the frozen contract (`contract.Env*` consts); core derives the concurrency from the memory budgets of the pipeline and sizes the container cap from the same number. The other four are agent-internal knobs that share the prefix so they are scrubbed alongside the credentials.
@@ -159,7 +159,7 @@ On Linux, when a process dies its parent must call `wait()` to clear it from the
 
 `exec` and `supervise` expose the `--landlock` filesystem isolation and `--seccomp-profile-json` syscall-filtering flags (Linux only). Network isolation is the container/cluster's responsibility (egress NetworkPolicy via `NetworkMode`/`NetworkPolicy`), not ghost's.
 
-- `--landlock`: apply Landlock filesystem restrictions (no namespaces). `--workdir` sets the read-write working directory.
+- `--landlock`: apply Landlock filesystem restrictions (no namespaces). `--workdir` sets the read-write working directory. When the kernel does not enforce Landlock, because the LSM is off or a seccomp profile denies the `landlock_*` syscalls, ghost refuses to run the command and says why on its own stderr, before any capture file is created. On a development host without Landlock, set `GHOST_LANDLOCK_BEST_EFFORT=true` to run the command without filesystem restrictions instead.
 - `--seccomp-profile-json`: apply a seccomp syscall filter. The value is an inline Docker-format seccomp profile JSON (single-sourced from core, never authored by ghost); ghost's pure-Go filter compiles it to a BPF program and installs it via `seccomp(2)` with TSYNC before the command runs, so the command and all descendants inherit it. The layer is opt-in: when empty (the default), no filter is applied.
 
 ```bash

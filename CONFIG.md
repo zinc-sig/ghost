@@ -120,6 +120,12 @@ Common diff flags for grading:
 - Booleans: `"true"` becomes `true`, `"false"` becomes `false`
 - Strings: Everything else remains as strings
 
+### Sandbox Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `GHOST_LANDLOCK_BEST_EFFORT` | When `true`, `exec --landlock`, `supervise --landlock`, `run --sandbox`, and the agent run commands without Landlock on a kernel that does not enforce it, instead of refusing. For development hosts only. | `false` |
+
 ### Upload Configuration Variables
 
 | Variable | Description | Example |
