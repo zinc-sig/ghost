@@ -2,6 +2,7 @@ package runner
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -427,25 +428,49 @@ func TestExecuteWithSandboxFlag(t *testing.T) {
 	_, _ = Execute(config)
 }
 
+const (
+	execModeChildEnv = "GHOST_EXEC_MODE_TEST_CHILD"
+	execModeDirEnv   = "GHOST_EXEC_MODE_TEST_DIR"
+)
+
+// TestExecuteExecModeNonExistentCommand runs ExecuteExec in a forked child.
+// ExecuteExec dup3s stdin, stdout and stderr onto the capture files before it
+// looks the command up, so calling it in the test process would leave the test
+// binary writing into those files and lose every later test's output.
 func TestExecuteExecModeNonExistentCommand(t *testing.T) {
+	if os.Getenv(execModeChildEnv) == "1" {
+		// CHILD: run ExecuteExec and report its error in a file, because this
+		// process's stderr now points at the capture. ExecuteExec does not
+		// return when the exec succeeds, so no file means no error.
+		dir := os.Getenv(execModeDirEnv)
+		err := ExecuteExec(&Config{
+			Command:    "nonexistentcommand12345",
+			Args:       []string{},
+			InputFile:  filepath.Join(dir, "input.txt"),
+			OutputFile: filepath.Join(dir, "output.txt"),
+			StderrFile: filepath.Join(dir, "stderr.txt"),
+			Exec:       true,
+		})
+		if err != nil && os.WriteFile(filepath.Join(dir, "error.txt"), []byte(err.Error()), 0o600) != nil {
+			os.Exit(2)
+		}
+		os.Exit(0)
+	}
+
+	// PARENT: fork the child with the capture dir, then read back its error.
 	tmpDir := t.TempDir()
-	inputFile := createTempFile(t, tmpDir, "input.txt", "")
-
-	config := &Config{
-		Command:    "nonexistentcommand12345",
-		Args:       []string{},
-		InputFile:  inputFile,
-		OutputFile: filepath.Join(tmpDir, "output.txt"),
-		StderrFile: filepath.Join(tmpDir, "stderr.txt"),
-		Exec:       true,
+	createTempFile(t, tmpDir, "input.txt", "")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestExecuteExecModeNonExistentCommand$")
+	cmd.Env = append(os.Environ(), execModeChildEnv+"=1", execModeDirEnv+"="+tmpDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("exec-mode child did not exit 0: %v\nchild output:\n%s", err, out)
 	}
-
-	err := ExecuteExec(config)
-	if err == nil {
-		t.Fatal("expected error for non-existent command in exec mode, got nil")
+	msg, err := os.ReadFile(filepath.Join(tmpDir, "error.txt"))
+	if err != nil {
+		t.Fatalf("expected error for non-existent command in exec mode, got none: %v", err)
 	}
-	if !strings.Contains(err.Error(), "command not found") && !strings.Contains(err.Error(), "not supported") {
-		t.Errorf("unexpected error: %v", err)
+	if !strings.Contains(string(msg), "command not found") && !strings.Contains(string(msg), "not supported") {
+		t.Errorf("unexpected error: %s", msg)
 	}
 }
 
