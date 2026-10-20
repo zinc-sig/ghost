@@ -9,8 +9,9 @@
 // the encoding (Temporal's default data converter marshals activity
 // payloads as JSON, so the json tags below are the wire format). Editing
 // this file requires the same edit to the core copy, the same update to
-// both repos' testdata goldens, and a ProtocolVersion bump for any change
-// that is not strictly additive-and-optional.
+// both repos' testdata goldens, and a ProtocolVersion bump unless an agent
+// that ignores the change still stages the workspace and runs the exec
+// correctly; a field that is optional on the wire can still need the bump.
 package contract
 
 import "time"
@@ -25,15 +26,28 @@ import "time"
 //
 // Version 2 requires memory-budget enforcement and the concurrency setting
 // in EnvMaxConcurrentExecs, which the container memory cap depends on.
-// Version 3 adds FetchSubmissionInput.Objects and FetchSubmissionInput.Answer;
-// an input carrying either at version 2 is a mismatch. Core sends 3 only for
-// a run that uses them and 2 otherwise, so an agent built for 3 serves a
-// core still sending 2.
-const ProtocolVersion = 3
+// Version 3 (ProtocolVersionObjects) adds FetchSubmissionInput.Objects and
+// FetchSubmissionInput.Answer, and version 4 (ProtocolVersionPlacements)
+// adds FetchSubmissionInput.Placements; an input carrying a field below the
+// version that introduced it is a mismatch. Core sends the lowest version
+// whose fields the run uses, so an agent built for 4 serves a core still
+// sending 2 or 3, and an image whose agent predates 4 keeps grading every
+// run that places no student file.
+const ProtocolVersion = 4
 
 // MinProtocolVersion is the oldest protocol the agent still serves. Core
-// sends it for a run that uses no version-3 field.
+// sends it for a run that uses no field of a later version.
 const MinProtocolVersion = 2
+
+// ProtocolVersionObjects is the version that introduced
+// FetchSubmissionInput.Objects and FetchSubmissionInput.Answer. Core sends
+// it for a run that uses either and places no student file.
+const ProtocolVersionObjects = 3
+
+// ProtocolVersionPlacements is the version that introduced
+// FetchSubmissionInput.Placements. Core sends it for a run that places
+// student files.
+const ProtocolVersionPlacements = 4
 
 // ProtocolMismatchErrorType is the Temporal ApplicationError type the
 // agent uses for version-skew failures. Core treats it as terminal for
@@ -43,14 +57,15 @@ const ProtocolMismatchErrorType = "GhostProtocolMismatch"
 // StagingInvalidErrorType is the Temporal ApplicationError type the agent
 // uses when the workspace cannot be staged as instructed and a rerun cannot
 // fix it: a teacher file (an object, or a file mirrored from a mount) would
-// be destroyed by the answer or by an object, because it is a directory
-// holding a teacher file at the write's target or sits where the target
-// needs a directory; one object's targets nest (one is inside another); or
-// an object's key does not exist. Core treats it as a configuration failure
-// of the marking scheme and does not retry. Nothing the student delivers
-// raises it: a delivered file or directory in the way is removed, and
-// several delivered root files matching the stem are resolved by name
-// order.
+// be destroyed by the answer, an object, or a student placement, because it
+// is a directory holding a teacher file at the write's target or sits where
+// the target needs a directory; one object's targets nest (one is inside
+// another); or an object's key does not exist. Core treats it as a
+// configuration failure of the marking scheme and does not retry. Nothing
+// the student delivers raises it: a delivered file or directory in the way
+// is removed, several delivered root files matching the stem are resolved
+// by name order, and a placement key that does not exist is a plain
+// activity error (see PlacementSpec).
 const StagingInvalidErrorType = "GhostStagingInvalid"
 
 // Activity names the agent registers on its per-run task queue and the
@@ -109,10 +124,12 @@ const (
 // The agent stages the workspace in this order, on every attempt from
 // scratch: every Downloads entry in list order, then the answer is set
 // aside (see AnswerSpec), then every Objects entry in list order, then the
-// answer is placed. A later write replaces whatever an earlier one left at
-// the same path, so a teacher object overwrites a student-delivered file.
-// Objects and Answer require protocol 3; a version-2 input carries
-// neither.
+// answer is placed, then every Placements entry in list order. A later
+// write replaces whatever an earlier one left at the same path, so a
+// teacher object overwrites a student-delivered file and a student
+// placement overwrites a teacher object. Objects and Answer require
+// protocol 3 and Placements requires protocol 4; an input below those
+// versions carries none of them.
 type FetchSubmissionInput struct {
 	ProtocolVersion int            `json:"protocol_version"`
 	Downloads       []DownloadSpec `json:"downloads"`
@@ -123,6 +140,9 @@ type FetchSubmissionInput struct {
 	// whenever the run carries Objects or a submission path, so the answer
 	// survives the object overlay.
 	Answer *AnswerSpec `json:"answer,omitempty"`
+	// Placements are single student files from the delivery, each written
+	// to one workspace path after the objects and the answer.
+	Placements []PlacementSpec `json:"placements,omitempty"`
 }
 
 // DownloadSpec is one object-storage prefix to mirror into the
@@ -158,16 +178,36 @@ type ObjectSpec struct {
 // stub at the target, if any, stays); when several root files match, the
 // first by byte-wise name order is the answer and the others stay where
 // they are, because only the student's delivery can produce that shape.
-// The answer is placed last and always wins its target: a teacher object
-// at the same path is replaced, and a student-delivered file or directory
-// in the way is removed. A teacher directory at the target (holding an
-// object's file or a file mirrored from a mount), or a teacher file where a
-// parent directory of the target must be, is StagingInvalidErrorType.
+// The answer is placed after the objects and always wins its target: a
+// teacher object at the same path is replaced, and a student-delivered
+// file or directory in the way is removed. A teacher directory at the
+// target (holding an object's file or a file mirrored from a mount), or a
+// teacher file where a parent directory of the target must be, is
+// StagingInvalidErrorType.
 type AnswerSpec struct {
 	Stem string `json:"stem"`
 	// TargetPath is relative to the run workspace root. Empty means the
 	// answer is restored under its original root name after the objects
 	// are written, so a teacher object with that name cannot replace it.
+	TargetPath string `json:"target_path"`
+}
+
+// PlacementSpec is a student placement: one object-storage key from the
+// student's delivery written to TargetPath, which is relative to the run
+// workspace root and must resolve inside it. Placements are written after
+// the objects and the answer, and each wins its target the way the answer
+// does: a teacher object or a file mirrored from a mount at the same path
+// is replaced, so a student file replaces a skeleton stub, and a delivered
+// file or directory in the way is removed. A teacher directory at the
+// target, or a teacher file where a parent directory of the target must
+// be, is StagingInvalidErrorType. The object is fetched before the target
+// is prepared, so a missing key changes nothing in the workspace; it fails
+// the activity with a plain, retryable error rather than
+// StagingInvalidErrorType, because a delivered file missing from storage
+// is not a problem of the marking scheme.
+type PlacementSpec struct {
+	Bucket     string `json:"bucket"`
+	Key        string `json:"key"`
 	TargetPath string `json:"target_path"`
 }
 

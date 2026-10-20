@@ -4,9 +4,9 @@ package contract
 // are byte-identical copies of the core repo's
 // internal/pipeline/agentcontract/testdata fixtures. If a change here
 // breaks these tests, it breaks the agent protocol. Update both repos
-// together and bump ProtocolVersion for anything that is not strictly
-// additive-and-optional. Fixtures are regenerated in the core repo
-// (UPDATE_GOLDEN=1) and copied verbatim.
+// together and bump ProtocolVersion unless an agent that ignores the
+// change still stages the workspace and runs the exec correctly. Fixtures
+// are regenerated in the core repo (UPDATE_GOLDEN=1) and copied verbatim.
 
 import (
 	"encoding/json"
@@ -20,9 +20,11 @@ import (
 func intPtr(v int) *int       { return &v }
 func strPtr(s string) *string { return &s }
 
+// canonicalFetchInput is a run that overlays teacher objects and moves the
+// answer, sent at the version that introduced them.
 func canonicalFetchInput() FetchSubmissionInput {
 	return FetchSubmissionInput{
-		ProtocolVersion: ProtocolVersion,
+		ProtocolVersion: ProtocolVersionObjects,
 		Downloads: []DownloadSpec{
 			{Bucket: "course-1", Prefix: "submissions/42/", TargetDir: "."},
 			{Bucket: "course-1", Prefix: "exams/7/marking-scheme/expected/", TargetDir: "expected"},
@@ -32,6 +34,25 @@ func canonicalFetchInput() FetchSubmissionInput {
 			{Bucket: "course-1", Key: "exams/7/marking-scheme-asset/q_java/v1/pom.xml", TargetPaths: []string{"pom.xml", "examination-assets/q_java/pom.xml"}},
 		},
 		Answer: &AnswerSpec{Stem: "q_java", TargetPath: "src/main/java/app/Solution.java"},
+	}
+}
+
+// canonicalPlacementsFetchInput is a run that places student files: no
+// delivery mirror and no answer, teacher objects, and one placement per
+// delivered file, one of them over the skeleton stub.
+func canonicalPlacementsFetchInput() FetchSubmissionInput {
+	return FetchSubmissionInput{
+		ProtocolVersion: ProtocolVersionPlacements,
+		Downloads: []DownloadSpec{
+			{Bucket: "course-1", Prefix: "exams/7/marking-scheme/expected/", TargetDir: "expected"},
+		},
+		Objects: []ObjectSpec{
+			{Bucket: "course-1", Key: "exams/7/marking-scheme-asset/q_java/v1/src/main/java/app/Solution.java", TargetPaths: []string{"src/main/java/app/Solution.java"}},
+		},
+		Placements: []PlacementSpec{
+			{Bucket: "course-1", Key: "submissions/42/q_java/Solution.java", TargetPath: "src/main/java/app/Solution.java"},
+			{Bucket: "course-1", Key: "submissions/42/report.pdf", TargetPath: "report.pdf"},
+		},
 	}
 }
 
@@ -118,6 +139,7 @@ func checkGolden(t *testing.T, name string, v any) {
 
 func TestWireEncodingFrozen(t *testing.T) {
 	checkGolden(t, "fetch_submission_input.golden.json", canonicalFetchInput())
+	checkGolden(t, "fetch_submission_input_placements.golden.json", canonicalPlacementsFetchInput())
 	checkGolden(t, "fetch_submission_result.golden.json", canonicalFetchResult())
 	checkGolden(t, "run_exec_input.golden.json", canonicalRunExecInput())
 	checkGolden(t, "exec_result.golden.json", canonicalExecResult())
@@ -135,6 +157,18 @@ func TestWireDecodingRoundTrips(t *testing.T) {
 	}
 	if !reflect.DeepEqual(canonicalFetchInput(), fetch) {
 		t.Errorf("FetchSubmissionInput round-trip mismatch: %+v", fetch)
+	}
+
+	raw, err = os.ReadFile(filepath.Join("testdata", "fetch_submission_input_placements.golden.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var placed FetchSubmissionInput
+	if err := json.Unmarshal(raw, &placed); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(canonicalPlacementsFetchInput(), placed) {
+		t.Errorf("FetchSubmissionInput with placements round-trip mismatch: %+v", placed)
 	}
 
 	raw, err = os.ReadFile(filepath.Join("testdata", "run_exec_input.golden.json"))

@@ -1,0 +1,31 @@
+{
+  "protocol_version": 4,
+  "downloads": [
+    {
+      "bucket": "course-1",
+      "prefix": "exams/7/marking-scheme/expected/",
+      "target_dir": "expected"
+    }
+  ],
+  "objects": [
+    {
+      "bucket": "course-1",
+      "key": "exams/7/marking-scheme-asset/q_java/v1/src/main/java/app/Solution.java",
+      "target_paths": [
+        "src/main/java/app/Solution.java"
+      ]
+    }
+  ],
+  "placements": [
+    {
+      "bucket": "course-1",
+      "key": "submissions/42/q_java/Solution.java",
+      "target_path": "src/main/java/app/Solution.java"
+    },
+    {
+      "bucket": "course-1",
+      "key": "submissions/42/report.pdf",
+      "target_path": "report.pdf"
+    }
+  ]
+}

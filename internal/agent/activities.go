@@ -58,12 +58,6 @@ func NewActivities(cfg *Config, store ObjectStore) *Activities {
 	return &Activities{cfg: cfg, store: store, sampler: memwatch.New()}
 }
 
-// workspaceObjectsVersion is the protocol version that introduced
-// FetchSubmissionInput.Objects and Answer. An older input carrying either
-// was built by a core whose contract copy disagrees with its version, so
-// it is a mismatch rather than a payload to serve.
-const workspaceObjectsVersion = 3
-
 // checkProtocol fails the activity with a non-retryable ApplicationError
 // of the contract's mismatch type when the version is outside the range
 // the agent serves: retrying cannot fix a stale environment image.
@@ -82,7 +76,8 @@ func checkProtocol(version int) error {
 // FetchSubmission stages the run workspace and completes the
 // readiness/version handshake (contract: ghost-fetch-submission). Every
 // attempt stages from scratch in the contract's order: the prefix
-// downloads, the answer set aside, the teacher objects, the answer placed.
+// downloads, the answer set aside, the teacher objects, the answer placed,
+// the student placements.
 // An instruction the workspace cannot satisfy fails with the contract's
 // non-retryable staging-invalid type; the package README describes the
 // rules.
@@ -90,10 +85,21 @@ func (a *Activities) FetchSubmission(ctx context.Context, in contract.FetchSubmi
 	if err := checkProtocol(in.ProtocolVersion); err != nil {
 		return contract.FetchSubmissionResult{}, err
 	}
-	if in.ProtocolVersion < workspaceObjectsVersion && (len(in.Objects) > 0 || in.Answer != nil) {
+	// An input carrying a field below the version that introduced it was
+	// built by a core whose contract copy disagrees with its version, so it
+	// is a mismatch rather than a payload to serve.
+	if in.ProtocolVersion < contract.ProtocolVersionObjects && (len(in.Objects) > 0 || in.Answer != nil) {
 		return contract.FetchSubmissionResult{}, temporal.NewNonRetryableApplicationError(
 			fmt.Sprintf("workspace objects and the answer placement require protocol v%d, core sent v%d",
-				workspaceObjectsVersion, in.ProtocolVersion),
+				contract.ProtocolVersionObjects, in.ProtocolVersion),
+			contract.ProtocolMismatchErrorType,
+			nil,
+		)
+	}
+	if in.ProtocolVersion < contract.ProtocolVersionPlacements && len(in.Placements) > 0 {
+		return contract.FetchSubmissionResult{}, temporal.NewNonRetryableApplicationError(
+			fmt.Sprintf("student placements require protocol v%d, core sent v%d",
+				contract.ProtocolVersionPlacements, in.ProtocolVersion),
 			contract.ProtocolMismatchErrorType,
 			nil,
 		)
@@ -143,7 +149,7 @@ func (a *Activities) FetchSubmission(ctx context.Context, in contract.FetchSubmi
 	}
 
 	var session string
-	if in.Answer != nil || len(in.Objects) > 0 {
+	if in.Answer != nil || len(in.Objects) > 0 || len(in.Placements) > 0 {
 		session, err = os.MkdirTemp(a.cfg.StagingDir, "fetch-")
 		if err != nil {
 			return contract.FetchSubmissionResult{}, fmt.Errorf("failed to create staging session dir: %w", err)
@@ -217,10 +223,11 @@ func (a *Activities) FetchSubmission(ctx context.Context, in contract.FetchSubmi
 		activity.RecordHeartbeat(ctx)
 	}
 
-	// The answer is placed last and wins its target. A delivered file or
-	// directory in the way is removed; a teacher file in the way, written
-	// by an object or mirrored from a mount, is a staging failure no rerun
-	// can fix.
+	// The answer is placed after the objects and wins its target. A
+	// delivered file or directory in the way is removed; a teacher file in
+	// the way, written by an object or mirrored from a mount, is a staging
+	// failure no rerun can fix.
+	var answerDest string
 	if answer != nil {
 		rel := in.Answer.TargetPath
 		if rel == "" {
@@ -239,7 +246,43 @@ func (a *Activities) FetchSubmission(ctx context.Context, in contract.FetchSubmi
 		if err := moveFile(answer.path, dest); err != nil {
 			return contract.FetchSubmissionResult{}, fmt.Errorf("failed to place answer %s at %s: %w", answer.name, rel, err)
 		}
+		answerDest = dest
 		logger.Info("fetch-submission: answer placed", "stem", in.Answer.Stem, "answer", answer.name, "target", rel)
+	}
+
+	// Student placements come last and win their targets the way the answer
+	// does: a teacher file at the exact target is replaced, while a teacher
+	// directory or a teacher file on the way is a staging failure. teacher
+	// holds the paths that still carry a teacher file, so a path the answer
+	// or an earlier placement replaced is a student file and is left out; a
+	// later placement may then need a directory there.
+	teacher := slices.DeleteFunc(slices.Concat(written, mounted), func(p string) bool { return p == answerDest })
+	for idx, p := range in.Placements {
+		dest, err := resolveFile(a.cfg.Workdir, p.TargetPath)
+		if err != nil {
+			return contract.FetchSubmissionResult{}, fmt.Errorf("placement target %q: %w", p.TargetPath, err)
+		}
+		if err := teacherBlocks(a.cfg.Workdir, dest, teacher); err != nil {
+			return contract.FetchSubmissionResult{}, stagingInvalid("student file %s cannot be placed at %s: %v", p.Key, p.TargetPath, err)
+		}
+		// A delivered key missing from storage is not a marking-scheme
+		// problem, so it stays a plain error that core may retry rather
+		// than the staging failure a missing teacher object is.
+		staged := filepath.Join(session, fmt.Sprintf("placement-%d", idx))
+		n, err := a.store.DownloadObject(ctx, p.Bucket, p.Key, []string{staged}, 0o644)
+		if err != nil {
+			return contract.FetchSubmissionResult{}, fmt.Errorf("student file %s/%s: %w", p.Bucket, p.Key, err)
+		}
+		if err := prepareFileTarget(a.cfg.Workdir, dest, 0o755); err != nil {
+			return contract.FetchSubmissionResult{}, fmt.Errorf("placement target %q: %w", p.TargetPath, err)
+		}
+		if err := moveFile(staged, dest); err != nil {
+			return contract.FetchSubmissionResult{}, fmt.Errorf("failed to place student file %s at %s: %w", p.Key, p.TargetPath, err)
+		}
+		teacher = slices.DeleteFunc(teacher, func(t string) bool { return t == dest })
+		res.Files++
+		res.Bytes += n
+		activity.RecordHeartbeat(ctx)
 	}
 	return res, nil
 }
