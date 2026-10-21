@@ -712,7 +712,7 @@ func (a *Activities) RunExec(ctx context.Context, in contract.RunExecInput) (con
 		// heartbeat stop runs on return.)
 		timer.Stop()
 		killProcessGroup(cmd)
-		<-waitCh
+		<-waitCh //nolint:errcheck // the child was just killed; its wait error says nothing ctx.Err() does not
 		a.sampler.Finish(watch)
 		finish()
 		return contract.ExecResult{}, ctx.Err()

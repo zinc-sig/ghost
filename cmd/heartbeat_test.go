@@ -66,7 +66,9 @@ func TestHeartbeatWritesTimestamp(t *testing.T) {
 
 	// Cancel the heartbeat
 	cancel()
-	<-errCh
+	if err := <-errCh; err != nil {
+		t.Fatalf("heartbeat returned %v after cancel, want nil", err)
+	}
 
 	// Verify the timestamp is recent (within 5 seconds)
 	now := time.Now().Unix()
