@@ -168,8 +168,10 @@ func (s *minioStore) DownloadObject(ctx context.Context, bucket, key string, des
 }
 
 // ErrObjectNotFound reports that an object key, or its bucket, does not
-// exist. A key core resolved from the pinned snapshot that is gone at fetch
-// time is a configuration problem a rerun cannot fix.
+// exist. For a teacher object, a key core resolved from the pinned snapshot
+// that is gone at fetch time is a configuration problem a rerun cannot fix.
+// For a student placement it is not a problem of the marking scheme, so the
+// fetch fails with a plain, retryable error instead.
 var ErrObjectNotFound = errors.New("object not found")
 
 // writeObject copies one object's content to every dests entry, each

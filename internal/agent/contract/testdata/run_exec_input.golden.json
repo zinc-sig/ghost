@@ -1,5 +1,5 @@
 {
-  "protocol_version": 3,
+  "protocol_version": 4,
   "stage": "test",
   "scenario_code": "q_sa",
   "spec": {

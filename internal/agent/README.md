@@ -40,21 +40,35 @@ directory:
    name when `target_path` is empty, and wins its slot: a teacher object at
    the same path is replaced, and a delivered file or directory in the way
    is removed.
+5. Every `placements` entry, in list order: the student file is fetched
+   into the staging session and placed at its `target_path`, winning its
+   slot the way the answer does. A teacher object or a mounted file at the
+   same path is replaced, so a student file replaces a skeleton stub; a
+   delivered file or directory in the way, the answer included, is removed.
+   A teacher file the answer or an earlier placement replaced at its exact
+   path is a student file from then on, so a later placement may need a
+   directory there.
+   Placements need protocol 4 (`ProtocolVersionPlacements`); objects and
+   the answer need protocol 3 (`ProtocolVersionObjects`), and an input that
+   carries a field below its version is a protocol mismatch.
 
 Teacher files are protected: a write that would destroy one is a failure
-no rerun can fix. That covers the answer or an object landing on a
-directory that holds a teacher file (an object's, or one mirrored from a
-mount), or needing a directory where a teacher file sits; one object whose
-targets nest; and an object key that does not exist. The activity then
+no rerun can fix. That covers the answer, an object, or a placement
+landing on a directory that holds a teacher file (an object's, or one
+mirrored from a mount), or needing a directory where a teacher file sits;
+one object whose targets nest; and an object key that does not exist. The activity then
 fails with the non-retryable `GhostStagingInvalid` error, before the
 offending write, and core reports a configuration failure of the marking
 scheme. Replacing one teacher file at its exact path is not a failure: a
-later object wins, and the answer always wins its target. Nothing in the
-student's delivery raises the error.
+later object wins, and the answer and every placement win their targets.
+Nothing in the student's delivery raises the error. A placement key that
+does not exist is a plain, retryable error instead, because a delivered
+file missing from storage is not a problem of the marking scheme; it fails
+before the placement's target is prepared.
 
-The set-aside and the placement cross filesystems when the staging
-directory is a tmpfs and the workspace a volume, so both fall back from a
-rename to a copy. A missing object key fails the activity before any of its
+The answer's set-aside and placement, and every student placement, cross
+filesystems when the staging directory is a tmpfs and the workspace a
+volume, so each falls back from a rename to a copy. A missing object key fails the activity before any of its
 targets is prepared; a target that escapes the workspace or names the root
 fails it before anything is written. The result counts every written target
 as one file.

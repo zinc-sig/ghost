@@ -21,6 +21,7 @@ func TestProtocolMismatch(t *testing.T) {
 	env := newActivityEnv(t, cfg, newFakeStore())
 
 	objects := []contract.ObjectSpec{{Bucket: "b", Key: "k", TargetPaths: []string{"k"}}}
+	placements := []contract.PlacementSpec{{Bucket: "b", Key: "k", TargetPath: "k"}}
 	cases := []struct {
 		name     string
 		activity string
@@ -30,6 +31,8 @@ func TestProtocolMismatch(t *testing.T) {
 		{"FetchSubmission/below range", contract.FetchSubmissionActivity, contract.FetchSubmissionInput{ProtocolVersion: contract.MinProtocolVersion - 1}},
 		{"FetchSubmission/objects at the oldest version", contract.FetchSubmissionActivity, contract.FetchSubmissionInput{ProtocolVersion: contract.MinProtocolVersion, Objects: objects}},
 		{"FetchSubmission/answer at the oldest version", contract.FetchSubmissionActivity, contract.FetchSubmissionInput{ProtocolVersion: contract.MinProtocolVersion, Answer: &contract.AnswerSpec{Stem: "q"}}},
+		{"FetchSubmission/placements at the objects version", contract.FetchSubmissionActivity, contract.FetchSubmissionInput{ProtocolVersion: contract.ProtocolVersionObjects, Placements: placements}},
+		{"FetchSubmission/placements at the oldest version", contract.FetchSubmissionActivity, contract.FetchSubmissionInput{ProtocolVersion: contract.MinProtocolVersion, Placements: placements}},
 		{"RunExec/above range", contract.RunExecActivity, contract.RunExecInput{ProtocolVersion: contract.ProtocolVersion + 1}},
 		{"RunExec/below range", contract.RunExecActivity, contract.RunExecInput{ProtocolVersion: contract.MinProtocolVersion - 1}},
 	}
@@ -64,7 +67,7 @@ func TestFetchSubmission(t *testing.T) {
 	env := newActivityEnv(t, cfg, store)
 
 	input := contract.FetchSubmissionInput{
-		ProtocolVersion: contract.ProtocolVersion,
+		ProtocolVersion: contract.ProtocolVersionObjects,
 		Downloads: []contract.DownloadSpec{
 			{Bucket: "course-1", Prefix: "submissions/42/", TargetDir: "."},
 			{Bucket: "course-1", Prefix: "assets/", TargetDir: "expected"},
@@ -80,7 +83,7 @@ func TestFetchSubmission(t *testing.T) {
 	}
 
 	want := contract.FetchSubmissionResult{
-		AgentProtocolVersion: contract.ProtocolVersion,
+		AgentProtocolVersion: contract.ProtocolVersionObjects,
 		AgentVersion:         "test",
 		Files:                3,
 		Bytes:                int64(len("print(1)\n") + len("util\n") + len("ok\n")),
@@ -112,7 +115,7 @@ func TestFetchSubmission(t *testing.T) {
 // would fail core's per-run version check for a run sent at the oldest
 // version.
 func TestProtocolRangeEchoed(t *testing.T) {
-	for _, version := range []int{contract.MinProtocolVersion, contract.ProtocolVersion} {
+	for version := contract.MinProtocolVersion; version <= contract.ProtocolVersion; version++ {
 		t.Run(strconv.Itoa(version), func(t *testing.T) {
 			cfg := newTestConfig(t)
 			env := newActivityEnv(t, cfg, newFakeStore())
@@ -180,7 +183,7 @@ func wantMissing(t *testing.T, root string, rels ...string) {
 // teacher skeleton written after it, and the answer moved into the tree.
 func stagingInput() contract.FetchSubmissionInput {
 	return contract.FetchSubmissionInput{
-		ProtocolVersion: contract.ProtocolVersion,
+		ProtocolVersion: contract.ProtocolVersionObjects,
 		Downloads:       []contract.DownloadSpec{{Bucket: "course-1", Prefix: "submissions/42/", TargetDir: "."}},
 		Objects: []contract.ObjectSpec{
 			{Bucket: "course-1", Key: "assets/q_java/src/main/java/app/Main.java", TargetPaths: []string{"src/main/java/app/Main.java"}},
@@ -215,7 +218,7 @@ func TestFetchSubmission_ObjectsAndAnswer(t *testing.T) {
 		t.Fatalf("FetchSubmission failed: %v", err)
 	}
 	want := contract.FetchSubmissionResult{
-		AgentProtocolVersion: contract.ProtocolVersion,
+		AgentProtocolVersion: contract.ProtocolVersionObjects,
 		AgentVersion:         "test",
 		Files:                5,
 		Bytes:                int64(len("student solution\n") + len("student pom\n") + len("teacher main\n") + 2*len("teacher pom\n")),
@@ -283,7 +286,7 @@ func TestFetchSubmission_RetryOverReplacedShapes(t *testing.T) {
 				"asset/pom.xml":         []byte("teacher pom\n"),
 			},
 			contract.FetchSubmissionInput{
-				ProtocolVersion: contract.ProtocolVersion,
+				ProtocolVersion: contract.ProtocolVersionObjects,
 				Downloads:       downloads,
 				Objects:         []contract.ObjectSpec{{Bucket: "b", Key: "asset/pom.xml", TargetPaths: []string{"pom.xml"}}},
 			},
@@ -297,7 +300,7 @@ func TestFetchSubmission_RetryOverReplacedShapes(t *testing.T) {
 				"asset/Main.java": []byte("teacher main\n"),
 			},
 			contract.FetchSubmissionInput{
-				ProtocolVersion: contract.ProtocolVersion,
+				ProtocolVersion: contract.ProtocolVersionObjects,
 				Downloads:       downloads,
 				Objects:         []contract.ObjectSpec{{Bucket: "b", Key: "asset/Main.java", TargetPaths: []string{"src/Main.java"}}},
 			},
@@ -311,7 +314,7 @@ func TestFetchSubmission_RetryOverReplacedShapes(t *testing.T) {
 				"sub/src/Solution.java/x": []byte("delivered directory\n"),
 			},
 			contract.FetchSubmissionInput{
-				ProtocolVersion: contract.ProtocolVersion,
+				ProtocolVersion: contract.ProtocolVersionObjects,
 				Downloads:       downloads,
 				Answer:          &contract.AnswerSpec{Stem: "q_java", TargetPath: "src/Solution.java"},
 			},
@@ -325,7 +328,7 @@ func TestFetchSubmission_RetryOverReplacedShapes(t *testing.T) {
 				"sub/src":         []byte("delivered file\n"),
 			},
 			contract.FetchSubmissionInput{
-				ProtocolVersion: contract.ProtocolVersion,
+				ProtocolVersion: contract.ProtocolVersionObjects,
 				Downloads:       downloads,
 				Answer:          &contract.AnswerSpec{Stem: "q_java", TargetPath: "src/Solution.java"},
 			},
@@ -370,7 +373,7 @@ func TestFetchSubmission_AnswerRestoredAtRootName(t *testing.T) {
 	env := newActivityEnv(t, cfg, store)
 
 	in := contract.FetchSubmissionInput{
-		ProtocolVersion: contract.ProtocolVersion,
+		ProtocolVersion: contract.ProtocolVersionObjects,
 		Downloads:       []contract.DownloadSpec{{Bucket: "b", Prefix: "sub/", TargetDir: "."}},
 		Objects:         []contract.ObjectSpec{{Bucket: "b", Key: "asset/stub.java", TargetPaths: []string{"q_java.java"}}},
 		Answer:          &contract.AnswerSpec{Stem: "q_java"},
@@ -395,7 +398,7 @@ func TestFetchSubmission_AnswerNoMatchKeepsStub(t *testing.T) {
 	env := newActivityEnv(t, cfg, store)
 
 	in := contract.FetchSubmissionInput{
-		ProtocolVersion: contract.ProtocolVersion,
+		ProtocolVersion: contract.ProtocolVersionObjects,
 		Downloads:       []contract.DownloadSpec{{Bucket: "b", Prefix: "sub/", TargetDir: "."}},
 		Objects:         []contract.ObjectSpec{{Bucket: "b", Key: "asset/stub.java", TargetPaths: []string{"src/Solution.java"}}},
 		Answer:          &contract.AnswerSpec{Stem: "q_java", TargetPath: "src/Solution.java"},
@@ -425,7 +428,7 @@ func TestFetchSubmission_AnswerSeveralMatchesByName(t *testing.T) {
 	env := newActivityEnv(t, cfg, store)
 
 	in := contract.FetchSubmissionInput{
-		ProtocolVersion: contract.ProtocolVersion,
+		ProtocolVersion: contract.ProtocolVersionObjects,
 		Downloads:       []contract.DownloadSpec{{Bucket: "b", Prefix: "sub/", TargetDir: "."}},
 		Answer:          &contract.AnswerSpec{Stem: "q_java", TargetPath: "answer/Solution"},
 	}
@@ -457,7 +460,7 @@ func TestFetchSubmission_ObjectReplacesDeliveredBlockers(t *testing.T) {
 	env := newActivityEnv(t, cfg, store)
 
 	in := contract.FetchSubmissionInput{
-		ProtocolVersion: contract.ProtocolVersion,
+		ProtocolVersion: contract.ProtocolVersionObjects,
 		Downloads:       []contract.DownloadSpec{{Bucket: "b", Prefix: "sub/", TargetDir: "."}},
 		Objects: []contract.ObjectSpec{
 			{Bucket: "b", Key: "asset/pom.xml", TargetPaths: []string{"pom.xml"}},
@@ -500,7 +503,7 @@ func TestFetchSubmission_AnswerReplacesDeliveredBlockers(t *testing.T) {
 			env := newActivityEnv(t, cfg, store)
 
 			in := contract.FetchSubmissionInput{
-				ProtocolVersion: contract.ProtocolVersion,
+				ProtocolVersion: contract.ProtocolVersionObjects,
 				Downloads:       []contract.DownloadSpec{{Bucket: "b", Prefix: "sub/", TargetDir: "."}},
 				Answer:          &contract.AnswerSpec{Stem: "q_java", TargetPath: "src/main/java/app/Solution.java"},
 			}
@@ -537,7 +540,7 @@ func TestFetchSubmission_StagingInvalid(t *testing.T) {
 			env := newActivityEnv(t, cfg, store)
 
 			in := contract.FetchSubmissionInput{
-				ProtocolVersion: contract.ProtocolVersion,
+				ProtocolVersion: contract.ProtocolVersionObjects,
 				Downloads:       []contract.DownloadSpec{{Bucket: "b", Prefix: "sub/", TargetDir: "."}},
 				Objects:         []contract.ObjectSpec{{Bucket: "b", Key: "asset/file", TargetPaths: []string{tc.target}}},
 				Answer:          &contract.AnswerSpec{Stem: "q_java", TargetPath: "src/app/Solution.java"},
@@ -581,7 +584,7 @@ func TestFetchSubmission_MissingObjectKeyFails(t *testing.T) {
 	env := newActivityEnv(t, cfg, store)
 
 	in := contract.FetchSubmissionInput{
-		ProtocolVersion: contract.ProtocolVersion,
+		ProtocolVersion: contract.ProtocolVersionObjects,
 		Downloads:       []contract.DownloadSpec{{Bucket: "b", Prefix: "sub/", TargetDir: "."}},
 		Objects:         []contract.ObjectSpec{{Bucket: "b", Key: "asset/absent", TargetPaths: []string{"dir", "new/deep/c.txt"}}},
 	}
@@ -611,7 +614,7 @@ func TestFetchSubmission_ObjectTargetRejected(t *testing.T) {
 			cfg := newTestConfig(t)
 			env := newActivityEnv(t, cfg, store)
 			in := contract.FetchSubmissionInput{
-				ProtocolVersion: contract.ProtocolVersion,
+				ProtocolVersion: contract.ProtocolVersionObjects,
 				Objects:         []contract.ObjectSpec{{Bucket: "b", Key: "asset/file", TargetPaths: []string{target}}},
 			}
 			if _, err := fetchRun(t, env, in); err == nil {
@@ -634,7 +637,7 @@ func TestFetchSubmission_AnswerTargetRejected(t *testing.T) {
 	env := newActivityEnv(t, cfg, store)
 
 	in := contract.FetchSubmissionInput{
-		ProtocolVersion: contract.ProtocolVersion,
+		ProtocolVersion: contract.ProtocolVersionObjects,
 		Downloads:       []contract.DownloadSpec{{Bucket: "b", Prefix: "sub/", TargetDir: "."}},
 		Answer:          &contract.AnswerSpec{Stem: "q_java", TargetPath: "../escape.java"},
 	}
@@ -757,7 +760,7 @@ func TestFetchSubmission_TraversalKeyRejected(t *testing.T) {
 	env := newActivityEnv(t, cfg, store)
 
 	input := contract.FetchSubmissionInput{
-		ProtocolVersion: contract.ProtocolVersion,
+		ProtocolVersion: contract.ProtocolVersionObjects,
 		Downloads:       []contract.DownloadSpec{{Bucket: "b", Prefix: "sub/", TargetDir: "."}},
 	}
 	if _, err := env.ExecuteActivity(contract.FetchSubmissionActivity, input); err == nil {
@@ -774,7 +777,7 @@ func TestFetchSubmission_TargetDirTraversalRejected(t *testing.T) {
 
 	for _, target := range []string{"../escape", "/abs/escape"} {
 		input := contract.FetchSubmissionInput{
-			ProtocolVersion: contract.ProtocolVersion,
+			ProtocolVersion: contract.ProtocolVersionObjects,
 			Downloads:       []contract.DownloadSpec{{Bucket: "b", Prefix: "p/", TargetDir: target}},
 		}
 		if _, err := env.ExecuteActivity(contract.FetchSubmissionActivity, input); err == nil {
@@ -1156,7 +1159,7 @@ func TestFetchSubmission_RetryIgnoresTeacherResidueMatchingStem(t *testing.T) {
 	env := newActivityEnv(t, cfg, store)
 
 	in := contract.FetchSubmissionInput{
-		ProtocolVersion: contract.ProtocolVersion,
+		ProtocolVersion: contract.ProtocolVersionObjects,
 		Downloads:       []contract.DownloadSpec{{Bucket: "b", Prefix: "sub/", TargetDir: "."}},
 		Objects: []contract.ObjectSpec{
 			{Bucket: "b", Key: "asset/q1.h", TargetPaths: []string{"q1.h"}},
@@ -1204,7 +1207,7 @@ func TestFetchSubmission_MountedTeacherDirectoryIsProtected(t *testing.T) {
 		{
 			"answer on a mounted directory",
 			contract.FetchSubmissionInput{
-				ProtocolVersion: contract.ProtocolVersion,
+				ProtocolVersion: contract.ProtocolVersionObjects,
 				Downloads:       downloads,
 				Answer:          &contract.AnswerSpec{Stem: "q1", TargetPath: "expected"},
 			},
@@ -1214,7 +1217,7 @@ func TestFetchSubmission_MountedTeacherDirectoryIsProtected(t *testing.T) {
 		{
 			"answer below a mounted file",
 			contract.FetchSubmissionInput{
-				ProtocolVersion: contract.ProtocolVersion,
+				ProtocolVersion: contract.ProtocolVersionObjects,
 				Downloads:       downloads,
 				Answer:          &contract.AnswerSpec{Stem: "q1", TargetPath: "expected/out.txt/main.py"},
 			},
@@ -1224,7 +1227,7 @@ func TestFetchSubmission_MountedTeacherDirectoryIsProtected(t *testing.T) {
 		{
 			"object on a mounted directory",
 			contract.FetchSubmissionInput{
-				ProtocolVersion: contract.ProtocolVersion,
+				ProtocolVersion: contract.ProtocolVersionObjects,
 				Downloads:       downloads,
 				Objects:         []contract.ObjectSpec{{Bucket: "b", Key: "asset/replace", TargetPaths: []string{"expected"}}},
 			},
@@ -1234,7 +1237,7 @@ func TestFetchSubmission_MountedTeacherDirectoryIsProtected(t *testing.T) {
 		{
 			"object replacing one mounted file",
 			contract.FetchSubmissionInput{
-				ProtocolVersion: contract.ProtocolVersion,
+				ProtocolVersion: contract.ProtocolVersionObjects,
 				Downloads:       downloads,
 				Objects:         []contract.ObjectSpec{{Bucket: "b", Key: "asset/replace", TargetPaths: []string{"expected/out.txt"}}},
 			},
@@ -1269,7 +1272,7 @@ func TestFetchSubmission_NestedObjectTargetsAreInvalid(t *testing.T) {
 	env := newActivityEnv(t, cfg, store)
 
 	in := contract.FetchSubmissionInput{
-		ProtocolVersion: contract.ProtocolVersion,
+		ProtocolVersion: contract.ProtocolVersionObjects,
 		Objects:         []contract.ObjectSpec{{Bucket: "b", Key: "asset/file", TargetPaths: []string{"x", "x/y"}}},
 	}
 	_, err := fetchRun(t, env, in)
