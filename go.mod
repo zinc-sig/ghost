@@ -11,7 +11,7 @@ require (
 	github.com/shopspring/decimal v1.4.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
-	go.temporal.io/sdk v1.49.0
+	go.temporal.io/sdk v1.50.0
 	go.uber.org/automaxprocs v1.6.0
 	golang.org/x/net v0.61.0
 	golang.org/x/sys v0.49.0
