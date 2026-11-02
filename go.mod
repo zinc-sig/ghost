@@ -6,7 +6,7 @@ toolchain go1.26.9
 
 require (
 	github.com/elastic/go-seccomp-bpf v1.6.0
-	github.com/landlock-lsm/go-landlock v0.10.1
+	github.com/landlock-lsm/go-landlock v0.11.0
 	github.com/minio/minio-go/v7 v7.3.0
 	github.com/shopspring/decimal v1.4.0
 	github.com/spf13/cobra v1.10.2
